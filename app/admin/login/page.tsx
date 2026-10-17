@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, type FormEvent } from 'react'
+import { Suspense, useState, useEffect, type FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
-export default function AdminLoginPage() {
+function AdminLoginContent() {
   const router = useRouter()
   const params = useSearchParams()
   const next = params.get('next') ?? '/admin/quiz'
@@ -91,5 +91,13 @@ export default function AdminLoginPage() {
         </p>
       </div>
     </main>
+  )
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={<main className="al-root" aria-busy="true" />}>
+      <AdminLoginContent />
+    </Suspense>
   )
 }

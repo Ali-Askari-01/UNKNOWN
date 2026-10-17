@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "pnpm@12.3.4",
   "scripts": {
-    "dev": "node --import tsx/esm server.ts",
+    "dev": "tsx server.ts",
     "build": "next build",
-    "start": "NODE_ENV=production node --import tsx/esm server.ts"
+    "start": "set NODE_ENV=production&& tsx server.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
