@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getSocket } from '@/lib/socket-client'
-import type { RoomSnapshot, TeamScore } from '@/lib/quiz-state'
+import type { RoomSnapshot, TeamScore } from '@/types'
 
 type ClassId = 'ix' | 'x' | 'xi'
 
@@ -46,7 +46,7 @@ function RoomPanel({
     [socket, room.classId]
   )
 
-  const [customCode, setCustomCode] = useState(room.code)
+  const [customCode, setCustomCode] = useState(room.code ?? '')
   const [pointsValue, setPointsValue] = useState(10)
   const [deductValue, setDeductValue] = useState(0)
   const [adjustGroup, setAdjustGroup] = useState(room.scores[0]?.groupName ?? '')
@@ -61,7 +61,7 @@ function RoomPanel({
   }
 
   // Keep customCode in sync when room.code changes from server
-  useEffect(() => { setCustomCode(room.code) }, [room.code])
+  useEffect(() => { setCustomCode(room.code ?? '') }, [room.code])
   useEffect(() => {
     if (room.scores.length > 0 && !adjustGroup) setAdjustGroup(room.scores[0].groupName)
   }, [room.scores, adjustGroup])

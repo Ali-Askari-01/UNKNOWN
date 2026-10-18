@@ -1,8 +1,8 @@
 # Architecture
 
 > Status: Phase 2 design. Implementation lands in Phases 3–8.
-> Current runtime (pre-refactor): `server.ts` + `lib/quiz-state.ts` own all state; see
-> "Current Runtime" at the bottom.
+> The pre-refactor runtime (`server.ts` + `lib/quiz-state.ts` owning all state)
+> was retired in Phase 8; the service-backed runtime is live.
 
 ## Design Goals
 
@@ -56,9 +56,9 @@ tests/                          # Vitest (Phase 9)
 docs/                           # this folder
 ```
 
-`lib/quiz-state.ts` logic is **migrated** into services/repositories (not duplicated);
-the file is removed or reduced to a compatibility shim once the frontend is wired in
-Phase 8.
+`lib/quiz-state.ts` logic was **migrated** into services/repositories (not duplicated);
+the file was deleted in Phase 8 once the socket handlers and frontend were wired to
+the service layer.
 
 ## Service Boundaries
 
@@ -128,7 +128,7 @@ Browser (student) ──WS───► Socket handler ──► Zod validation �
 See `docs/REALTIME_EVENTS.md` for the event catalog and `docs/QUIZ_FLOW.md` for the
 end-to-end round sequence.
 
-## Current Runtime (as audited in Phase 1)
+## Legacy Runtime (audited in Phase 1 — removed in Phase 8)
 
 - `server.ts` — custom Next + Socket.IO server; all event handlers inline.
 - `lib/quiz-state.ts` — singleton in-memory state machine, 3 hardcoded rooms
@@ -136,5 +136,6 @@ end-to-end round sequence.
 - `proxy.ts` — Edge cookie-presence gate.
 - `lib/session.ts` — HMAC session tokens.
 
-This runtime keeps working during Phases 3–7; the refactor lands in Phase 8 when the
-frontend is rewired to the new service-backed handlers.
+This runtime kept working during Phases 3–7; the refactor landed in Phase 8, when the
+socket handlers and frontend were rewired to the service-backed handlers and
+`lib/quiz-state.ts` was deleted.

@@ -1,7 +1,7 @@
 # Quiz Flow
 
-> Status: Phase 2 design. Buzzer mechanics partially exist in `lib/quiz-state.ts`;
-> question-driven flow, pause/resume, and reopen rules land in Phases 6–7.
+> Status: Phase 2 design. Implemented across Phases 6–7; the legacy
+> `lib/quiz-state.ts` implementation was removed in Phase 8.
 
 ## Actors
 

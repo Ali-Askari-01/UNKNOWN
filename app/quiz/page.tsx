@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { getSocket } from '@/lib/socket-client'
 import { groups } from '@/data/event'
-import type { RoomSnapshot } from '@/lib/quiz-state'
+import type { RoomSnapshot } from '@/types'
 
 type ClassId = 'ix' | 'x' | 'xi'
 type JoinStep = 'select-class' | 'enter-code' | 'select-group' | 'in-room'
