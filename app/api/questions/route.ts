@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getContainer } from '@/server/container'
 import { requireAdmin } from '@/lib/auth'
 import { createQuestionSchema, parseOrThrow, questionsQuerySchema } from '@/lib/validation'
-import { ServiceError } from '@/server/services/errors'
 import { ValidationError } from '@/lib/validation'
 
 export async function GET(req: NextRequest) {

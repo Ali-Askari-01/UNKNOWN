@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getContainer } from '@/server/container'
 import { requireAdmin } from '@/lib/auth'
 import { parseOrThrow, classIdParamSchema, quizIdParamSchema, setCodeSchema, classOnlySchema } from '@/lib/validation'
-import { ServiceError } from '@/server/services/errors'
+import { isServiceError } from '@/server/services/errors'
 import { ValidationError } from '@/lib/validation'
 
 export async function POST(req: NextRequest, { params }: { params: { quizId: string; action: string } }) {
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: { quizId: str
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   } catch (error) {
     if (error instanceof ValidationError) return NextResponse.json({ error: error.message }, { status: 400 })
-    if (error instanceof ServiceError && error.code === 'invalid_state') return NextResponse.json({ error: error.message }, { status: 409 })
+    if (isServiceError(error) && error.code === 'invalid_state') return NextResponse.json({ error: error.message }, { status: 409 })
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

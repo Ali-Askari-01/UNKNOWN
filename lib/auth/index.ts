@@ -24,3 +24,10 @@ export {
   type AdminSessionResult,
 } from './guards'
 export { LoginRateLimiter, clientKeyFromRequest } from './rate-limit'
+export {
+  TEAM_TOKEN_MAX_AGE,
+  createTeamToken,
+  extractBearerToken,
+  verifyTeamToken,
+  type TeamTokenPayload,
+} from './team-token'

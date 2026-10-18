@@ -4,6 +4,7 @@ import { InMemoryTeamRepository } from '@/server/repositories/in-memory/team-rep
 import { InMemoryQuestionRepository } from '@/server/repositories/in-memory/question-repository'
 import { InMemoryQuizRepository } from '@/server/repositories/in-memory/quiz-repository'
 import { BuzzerService, type BuzzerServiceOptions } from '@/server/services/buzzer-service'
+import { AnswerService } from '@/server/services/answer-service'
 import { LeaderboardService } from '@/server/services/leaderboard-service'
 import { QuestionService } from '@/server/services/question-service'
 import { QuizService } from '@/server/services/quiz-service'
@@ -18,6 +19,7 @@ export interface AppContainer {
   leaderboard: LeaderboardService
   buzzer: BuzzerService
   quiz: QuizService
+  answer: AnswerService
 }
 
 export function createContainer(buzzerOptions: BuzzerServiceOptions = {}): AppContainer {
@@ -42,6 +44,8 @@ export function createContainer(buzzerOptions: BuzzerServiceOptions = {}): AppCo
     leaderboard,
   )
 
+  const answer = new AnswerService(repos.quizzes, questions, scoring, buzzer)
+
   for (const group of groups) {
     teams.seed(group.classId, group.name, group.slogan, [...group.members])
   }
@@ -49,12 +53,23 @@ export function createContainer(buzzerOptions: BuzzerServiceOptions = {}): AppCo
     quiz.prepare(classId)
   }
 
-  return { repos, teams, questions, scoring, leaderboard, buzzer, quiz }
+  return { repos, teams, questions, scoring, leaderboard, buzzer, quiz, answer }
 }
 
-let singleton: AppContainer | null = null
+/**
+ * The singleton is stored on globalThis: server.ts (tsx module graph) and the
+ * Next.js route handlers (webpack/turbopack bundle) each evaluate this module
+ * separately, so a module-level variable would produce two containers with
+ * divergent state. Symbol.for gives both graphs the same registry key.
+ */
+const CONTAINER_KEY = Symbol.for('UNKNOWN.quiz.container')
+
+interface ContainerGlobal {
+  [CONTAINER_KEY]?: AppContainer
+}
 
 export function getContainer(): AppContainer {
-  if (!singleton) singleton = createContainer()
-  return singleton
+  const g = globalThis as ContainerGlobal
+  if (!g[CONTAINER_KEY]) g[CONTAINER_KEY] = createContainer()
+  return g[CONTAINER_KEY]!
 }

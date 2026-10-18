@@ -17,9 +17,16 @@ import { parseCookie } from 'cookie'
 import { verifySessionToken } from './lib/session'
 import { assertSessionSecretConfigured } from './lib/auth/index'
 import { getContainer } from './server/container'
-import { ServiceError } from './server/services/errors'
+import { isServiceError } from './server/services/errors'
 import type { ClassId, RoomSnapshot } from './types'
-import { classIdSchema, parseOrThrow } from './lib/validation/index'
+import { ValidationError, answerSchema, classIdSchema, parseOrThrow } from './lib/validation/index'
+import {
+  broadcastLeaderboard,
+  broadcastRoom,
+  emitAnswerResult,
+  registerIO,
+} from './server/realtime/emitters'
+import { createTeamToken } from './lib/auth/index'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOSTNAME ?? 'localhost'
@@ -37,20 +44,6 @@ async function isAdminSocket(socket: Socket): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-function broadcastRoom(io: SocketIOServer, classId: ClassId) {
-  const container = getContainer()
-  const snap = container.quiz.snapshot(classId)
-  io.to(`room:${classId}`).emit('room:state', snap)
-  io.to('admin').emit('room:state', snap)
-}
-
-function broadcastLeaderboard(io: SocketIOServer, classId: ClassId) {
-  const container = getContainer()
-  const entries = container.leaderboard.get(classId)
-  io.to(`room:${classId}`).emit('leaderboard:update', { classId, entries })
-  io.to('admin').emit('leaderboard:update', { classId, entries })
 }
 
 function safeClassId(raw: unknown): ClassId | null {
@@ -73,6 +66,7 @@ app.prepare().then(() => {
     cors: { origin: '*', methods: ['GET', 'POST'] },
     transports: ['websocket', 'polling'],
   })
+  registerIO(io)
 
   io.use(async (socket, next) => {
     socket.data.isAdmin = await isAdminSocket(socket)
@@ -83,7 +77,7 @@ app.prepare().then(() => {
     const container = getContainer()
 
     container.buzzer.setExpireHandler((expiredClassId) => {
-      broadcastRoom(io, expiredClassId)
+      broadcastRoom(expiredClassId)
       io.to(`room:${expiredClassId}`).emit('buzzer:expired', {
         classId: expiredClassId,
       })
@@ -92,9 +86,9 @@ app.prepare().then(() => {
 
     socket.on(
       'room:join',
-      (
+      async (
         payload: { classId: ClassId; code: string; groupName: string },
-        cb: (res: { ok: boolean; error?: string; state?: RoomSnapshot }) => void
+        cb: (res: { ok: boolean; error?: string; state?: RoomSnapshot; token?: string }) => void
       ) => {
         try {
           const { classId, code, groupName } = payload ?? {}
@@ -111,11 +105,12 @@ app.prepare().then(() => {
           socket.data.groupName = result.team.name
           socket.join(`room:${classId}`)
           container.quiz.addConnected(classId, socket.id)
-          broadcastRoom(io, classId)
+          broadcastRoom(classId)
 
-          cb({ ok: true, state: container.quiz.snapshot(classId) })
+          const token = await createTeamToken(result.team.classId, result.team.name)
+          cb({ ok: true, state: container.quiz.snapshot(classId), token })
         } catch (error) {
-          if (error instanceof ServiceError) {
+          if (isServiceError(error)) {
             return cb({ ok: false, error: error.message })
           }
           return cb({ ok: false, error: 'Server error' })
@@ -139,13 +134,13 @@ app.prepare().then(() => {
       try {
         container.buzzer.press(classId, groupName)
       } catch (error) {
-        if (error instanceof ServiceError) {
+        if (isServiceError(error)) {
           return cb({ ok: false, error: error.message })
         }
         return cb({ ok: false, error: 'Server error' })
       }
 
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       io.to(`room:${classId}`).emit('buzzer:winner', {
         classId,
         teamName: groupName,
@@ -159,6 +154,33 @@ app.prepare().then(() => {
       cb({ ok: true })
     })
 
+    socket.on(
+      'answer:submit',
+      (
+        payload: { answer: string },
+        cb?: (res: { ok: boolean; error?: string; correct?: boolean; pointsAwarded?: number }) => void
+      ) => {
+        const { classId, groupName } = socket.data
+        if (!classId || !groupName) return cb?.({ ok: false, error: 'Not in a room.' })
+        try {
+          const { answer } = parseOrThrow(answerSchema, payload)
+          const result = container.answer.submitAnswer(classId, groupName, answer)
+          broadcastRoom(classId)
+          emitAnswerResult(classId, result.teamName, result.correct, result.pointsAwarded)
+          broadcastLeaderboard(classId)
+          cb?.({ ok: true, correct: result.correct, pointsAwarded: result.pointsAwarded })
+        } catch (error) {
+          if (isServiceError(error)) {
+            return cb?.({ ok: false, error: error.message })
+          }
+          if (error instanceof ValidationError) {
+            return cb?.({ ok: false, error: error.message })
+          }
+          return cb?.({ ok: false, error: 'Server error' })
+        }
+      }
+    )
+
     socket.on('admin:openRoom', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
       const classId = safeClassId(rawClassId)
@@ -166,10 +188,10 @@ app.prepare().then(() => {
       try {
         container.quiz.open(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -180,10 +202,10 @@ app.prepare().then(() => {
       try {
         container.quiz.reset(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -196,10 +218,10 @@ app.prepare().then(() => {
         try {
           container.quiz.setCode(classId, payload.code)
         } catch (error) {
-          if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+          if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
           return cb?.({ ok: false })
         }
-        broadcastRoom(io, classId)
+        broadcastRoom(classId)
         cb?.({ ok: true, code: container.quiz.getState(classId).code })
       }
     )
@@ -211,10 +233,10 @@ app.prepare().then(() => {
       try {
         container.quiz.start(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -225,10 +247,10 @@ app.prepare().then(() => {
       try {
         container.quiz.pause(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -239,10 +261,10 @@ app.prepare().then(() => {
       try {
         container.quiz.resume(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -253,11 +275,11 @@ app.prepare().then(() => {
       try {
         container.quiz.finish(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
-      broadcastLeaderboard(io, classId)
+      broadcastRoom(classId)
+      broadcastLeaderboard(classId)
       cb?.({ ok: true })
     })
 
@@ -268,10 +290,10 @@ app.prepare().then(() => {
       try {
         container.buzzer.activate(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -280,7 +302,7 @@ app.prepare().then(() => {
       const classId = safeClassId(rawClassId)
       if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
       container.buzzer.disable(classId)
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -291,10 +313,10 @@ app.prepare().then(() => {
       try {
         container.buzzer.reopen(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -309,20 +331,9 @@ app.prepare().then(() => {
         const points = typeof payload?.points === 'number' ? payload.points : 10
         container.scoring.award(classId, winner, points)
         container.buzzer.resolveAnswer(classId)
-        broadcastRoom(io, classId)
-        io.to(`room:${classId}`).emit('answer:result', {
-          classId,
-          teamName: winner,
-          correct: true,
-          pointsAwarded: points,
-        })
-        io.to('admin').emit('answer:result', {
-          classId,
-          teamName: winner,
-          correct: true,
-          pointsAwarded: points,
-        })
-        broadcastLeaderboard(io, classId)
+        broadcastRoom(classId)
+        emitAnswerResult(classId, winner, true, points)
+        broadcastLeaderboard(classId)
         cb?.({ ok: true })
       }
     )
@@ -338,20 +349,9 @@ app.prepare().then(() => {
         const deduct = typeof payload?.deduct === 'number' ? payload.deduct : 0
         if (deduct > 0) container.scoring.deduct(classId, winner, deduct)
         container.buzzer.resolveAnswer(classId)
-        broadcastRoom(io, classId)
-        io.to(`room:${classId}`).emit('answer:result', {
-          classId,
-          teamName: winner,
-          correct: false,
-          pointsAwarded: -deduct,
-        })
-        io.to('admin').emit('answer:result', {
-          classId,
-          teamName: winner,
-          correct: false,
-          pointsAwarded: -deduct,
-        })
-        broadcastLeaderboard(io, classId)
+        broadcastRoom(classId)
+        emitAnswerResult(classId, winner, false, -deduct)
+        broadcastLeaderboard(classId)
         cb?.({ ok: true })
       }
     )
@@ -365,8 +365,8 @@ app.prepare().then(() => {
           return cb?.({ ok: false, error: 'Invalid payload' })
         }
         container.scoring.adjust(classId, payload.groupName, payload.delta)
-        broadcastRoom(io, classId)
-        broadcastLeaderboard(io, classId)
+        broadcastRoom(classId)
+        broadcastLeaderboard(classId)
         cb?.({ ok: true })
       }
     )
@@ -378,10 +378,10 @@ app.prepare().then(() => {
       try {
         container.quiz.nextQuestion(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -392,10 +392,10 @@ app.prepare().then(() => {
       try {
         container.quiz.resetQuestion(classId)
       } catch (error) {
-        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        if (isServiceError(error)) return cb?.({ ok: false, error: error.message })
         return cb?.({ ok: false })
       }
-      broadcastRoom(io, classId)
+      broadcastRoom(classId)
       cb?.({ ok: true })
     })
 
@@ -414,7 +414,7 @@ app.prepare().then(() => {
       const { classId } = socket.data
       if (classId) {
         container.quiz.removeConnected(classId, socket.id)
-        broadcastRoom(io, classId)
+        broadcastRoom(classId)
       }
     })
   })
