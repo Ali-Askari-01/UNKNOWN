@@ -4,7 +4,8 @@
  * Run with: node --import tsx/esm server.ts   (dev)
  *       or: node --import tsx/esm server.ts   (prod after next build)
  *
- * All quiz state mutations happen here. Clients never mutate state directly.
+ * All quiz state mutations happen here via the service layer (server/services).
+ * Clients never mutate state directly.
  */
 
 import './server/bootstrap-als'
@@ -12,33 +13,13 @@ import { createServer } from 'node:http'
 import { parse } from 'node:url'
 import next from 'next'
 import { Server as SocketIOServer, type Socket } from 'socket.io'
-import { parse as parseCookie } from 'cookie'
+import { parseCookie } from 'cookie'
 import { verifySessionToken } from './lib/session'
 import { assertSessionSecretConfigured } from './lib/auth/index'
-
-import {
-  type ClassId,
-  type RoomSnapshot,
-  getRoom,
-  getAllRooms,
-  snapshot,
-  openRoom,
-  resetRoom,
-  setRoomCode,
-  startQuiz,
-  endQuiz,
-  activateBuzzer,
-  disableBuzzer,
-  pressBuzzer,
-  markCorrect,
-  markIncorrect,
-  adjustScore,
-  nextQuestion,
-  resetQuestion,
-  validateRoomEntry,
-} from './lib/quiz-state'
-
-// ─── Next.js app ─────────────────────────────────────────────────────────────
+import { getContainer } from './server/container'
+import { ServiceError } from './server/services/errors'
+import type { ClassId, RoomSnapshot } from './types'
+import { classIdSchema, parseOrThrow } from './lib/validation/index'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOSTNAME ?? 'localhost'
@@ -46,8 +27,6 @@ const port = parseInt(process.env.PORT ?? '3000', 10)
 
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
-
-// ─── Session helper ───────────────────────────────────────────────────────────
 
 async function isAdminSocket(socket: Socket): Promise<boolean> {
   try {
@@ -60,15 +39,27 @@ async function isAdminSocket(socket: Socket): Promise<boolean> {
   }
 }
 
-// ─── Emitters ─────────────────────────────────────────────────────────────────
-
 function broadcastRoom(io: SocketIOServer, classId: ClassId) {
-  const room = getRoom(classId)
-  const snap = snapshot(room)
+  const container = getContainer()
+  const snap = container.quiz.snapshot(classId)
   io.to(`room:${classId}`).emit('room:state', snap)
+  io.to('admin').emit('room:state', snap)
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+function broadcastLeaderboard(io: SocketIOServer, classId: ClassId) {
+  const container = getContainer()
+  const entries = container.leaderboard.get(classId)
+  io.to(`room:${classId}`).emit('leaderboard:update', { classId, entries })
+  io.to('admin').emit('leaderboard:update', { classId, entries })
+}
+
+function safeClassId(raw: unknown): ClassId | null {
+  try {
+    return parseOrThrow(classIdSchema, raw)
+  } catch {
+    return null
+  }
+}
 
 assertSessionSecretConfigured()
 
@@ -80,233 +71,354 @@ app.prepare().then(() => {
 
   const io = new SocketIOServer(httpServer, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
-    // Allow polling fallback for networks that block WS
     transports: ['websocket', 'polling'],
   })
 
-  // ── Middleware: tag each socket as admin or student ──────────────────────
   io.use(async (socket, next) => {
     socket.data.isAdmin = await isAdminSocket(socket)
     next()
   })
 
-  // ─── Connection handler ──────────────────────────────────────────────────
   io.on('connection', (socket) => {
-    // ── Student: join a room ───────────────────────────────────────────────
+    const container = getContainer()
+
+    container.buzzer.setExpireHandler((expiredClassId) => {
+      broadcastRoom(io, expiredClassId)
+      io.to(`room:${expiredClassId}`).emit('buzzer:expired', {
+        classId: expiredClassId,
+      })
+      io.to('admin').emit('buzzer:expired', { classId: expiredClassId })
+    })
+
     socket.on(
       'room:join',
       (
         payload: { classId: ClassId; code: string; groupName: string },
         cb: (res: { ok: boolean; error?: string; state?: RoomSnapshot }) => void
       ) => {
-        const { classId, code, groupName } = payload ?? {}
-        if (!classId || !code || !groupName) {
-          return cb({ ok: false, error: 'Missing fields.' })
-        }
-        if (!validateRoomEntry(classId, code)) {
-          return cb({ ok: false, error: 'Invalid room code or room is closed.' })
-        }
-        // Validate group belongs to this class
-        const room = getRoom(classId)
-        if (!room.scores[groupName]) {
-          return cb({ ok: false, error: 'This group is not registered in this room.' })
-        }
+        try {
+          const { classId, code, groupName } = payload ?? {}
+          if (!classId || !code || !groupName) {
+            return cb({ ok: false, error: 'Missing fields.' })
+          }
+          const result = container.quiz.join(classId, code, groupName)
 
-        // Leave any previous room
-        Array.from(socket.rooms)
-          .filter((r) => r.startsWith('room:'))
-          .forEach((r) => socket.leave(r))
+          Array.from(socket.rooms)
+            .filter((r) => r.startsWith('room:'))
+            .forEach((r) => socket.leave(r))
 
-        socket.data.classId = classId
-        socket.data.groupName = groupName
-        socket.join(`room:${classId}`)
-        room.connectedTeams.add(socket.id)
-        broadcastRoom(io, classId)
+          socket.data.classId = classId
+          socket.data.groupName = result.team.name
+          socket.join(`room:${classId}`)
+          container.quiz.addConnected(classId, socket.id)
+          broadcastRoom(io, classId)
 
-        cb({ ok: true, state: snapshot(room) })
+          cb({ ok: true, state: container.quiz.snapshot(classId) })
+        } catch (error) {
+          if (error instanceof ServiceError) {
+            return cb({ ok: false, error: error.message })
+          }
+          return cb({ ok: false, error: 'Server error' })
+        }
       }
     )
 
-    // ── Admin: join admin room (receives all class updates) ───────────────
     socket.on('admin:join', (cb: (res: { ok: boolean; states?: RoomSnapshot[] }) => void) => {
       if (!socket.data.isAdmin) return cb({ ok: false })
       socket.join('admin')
-      const states = getAllRooms().map(snapshot)
+      const states = (['ix', 'x', 'xi'] as ClassId[]).map((cid) =>
+        container.quiz.snapshot(cid)
+      )
       cb({ ok: true, states })
     })
 
-    // ── Student: press buzzer ─────────────────────────────────────────────
     socket.on('buzzer:press', (cb: (res: { ok: boolean; error?: string }) => void) => {
       const { classId, groupName } = socket.data
       if (!classId || !groupName) return cb({ ok: false, error: 'Not in a room.' })
 
-      const result = pressBuzzer(classId, groupName, (expiredClass) => {
-        // Timer expired — broadcast to room + admin
-        broadcastRoom(io, expiredClass)
-        const snap = snapshot(getRoom(expiredClass))
-        io.to('admin').emit('room:state', snap)
-      })
-
-      if (!result) {
-        return cb({ ok: false, error: 'Buzzer not active or already pressed.' })
+      try {
+        container.buzzer.press(classId, groupName)
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          return cb({ ok: false, error: error.message })
+        }
+        return cb({ ok: false, error: 'Server error' })
       }
 
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(result))
+      io.to(`room:${classId}`).emit('buzzer:winner', {
+        classId,
+        teamName: groupName,
+        answerDeadline: container.quiz.getState(classId).answerDeadline,
+      })
+      io.to('admin').emit('buzzer:winner', {
+        classId,
+        teamName: groupName,
+        answerDeadline: container.quiz.getState(classId).answerDeadline,
+      })
       cb({ ok: true })
     })
 
-    // ── Admin: open room ──────────────────────────────────────────────────
-    socket.on('admin:openRoom', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:openRoom', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = openRoom(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.open(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: reset room ─────────────────────────────────────────────────
-    socket.on('admin:resetRoom', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:resetRoom', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = resetRoom(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.reset(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: set room code ──────────────────────────────────────────────
-    socket.on('admin:setCode', (payload: { classId: ClassId; code: string }, cb?: Function) => {
-      if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = setRoomCode(payload.classId, payload.code)
-      io.to('admin').emit('room:state', snapshot(room))
-      cb?.({ ok: true })
-    })
+    socket.on(
+      'admin:setCode',
+      (payload: { classId: ClassId; code: string }, cb?: Function) => {
+        if (!socket.data.isAdmin) return cb?.({ ok: false })
+        const classId = safeClassId(payload?.classId)
+        if (!classId || !payload?.code) return cb?.({ ok: false, error: 'Invalid payload' })
+        try {
+          container.quiz.setCode(classId, payload.code)
+        } catch (error) {
+          if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+          return cb?.({ ok: false })
+        }
+        broadcastRoom(io, classId)
+        cb?.({ ok: true, code: container.quiz.getState(classId).code })
+      }
+    )
 
-    // ── Admin: start quiz ─────────────────────────────────────────────────
-    socket.on('admin:startQuiz', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:startQuiz', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = startQuiz(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.start(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: end quiz ───────────────────────────────────────────────────
-    socket.on('admin:endQuiz', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:pauseQuiz', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = endQuiz(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.pause(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: activate buzzer ────────────────────────────────────────────
-    socket.on('admin:activateBuzzer', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:resumeQuiz', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = activateBuzzer(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.resume(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: disable buzzer ─────────────────────────────────────────────
-    socket.on('admin:disableBuzzer', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:endQuiz', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = disableBuzzer(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.finish(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
+      broadcastLeaderboard(io, classId)
       cb?.({ ok: true })
     })
 
-    // ── Admin: re-enable buzzer (alias of activateBuzzer) ─────────────────
-    socket.on('admin:reEnableBuzzer', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:activateBuzzer', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = activateBuzzer(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.buzzer.activate(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: mark correct ───────────────────────────────────────────────
+    socket.on('admin:disableBuzzer', (rawClassId: ClassId, cb?: Function) => {
+      if (!socket.data.isAdmin) return cb?.({ ok: false })
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      container.buzzer.disable(classId)
+      broadcastRoom(io, classId)
+      cb?.({ ok: true })
+    })
+
+    socket.on('admin:reEnableBuzzer', (rawClassId: ClassId, cb?: Function) => {
+      if (!socket.data.isAdmin) return cb?.({ ok: false })
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.buzzer.reopen(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
+      broadcastRoom(io, classId)
+      cb?.({ ok: true })
+    })
+
     socket.on(
       'admin:markCorrect',
       (payload: { classId: ClassId; points: number }, cb?: Function) => {
         if (!socket.data.isAdmin) return cb?.({ ok: false })
-        const room = markCorrect(payload.classId, payload.points ?? 10)
-        broadcastRoom(io, payload.classId)
-        io.to('admin').emit('room:state', snapshot(room))
+        const classId = safeClassId(payload?.classId)
+        if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+        const winner = container.buzzer.currentWinner(classId)
+        if (!winner) return cb?.({ ok: false, error: 'No buzzer winner' })
+        const points = typeof payload?.points === 'number' ? payload.points : 10
+        container.scoring.award(classId, winner, points)
+        container.buzzer.resolveAnswer(classId)
+        broadcastRoom(io, classId)
+        io.to(`room:${classId}`).emit('answer:result', {
+          classId,
+          teamName: winner,
+          correct: true,
+          pointsAwarded: points,
+        })
+        io.to('admin').emit('answer:result', {
+          classId,
+          teamName: winner,
+          correct: true,
+          pointsAwarded: points,
+        })
+        broadcastLeaderboard(io, classId)
         cb?.({ ok: true })
       }
     )
 
-    // ── Admin: mark incorrect ─────────────────────────────────────────────
     socket.on(
       'admin:markIncorrect',
       (payload: { classId: ClassId; deduct: number }, cb?: Function) => {
         if (!socket.data.isAdmin) return cb?.({ ok: false })
-        const room = markIncorrect(payload.classId, payload.deduct ?? 0)
-        broadcastRoom(io, payload.classId)
-        io.to('admin').emit('room:state', snapshot(room))
+        const classId = safeClassId(payload?.classId)
+        if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+        const winner = container.buzzer.currentWinner(classId)
+        if (!winner) return cb?.({ ok: false, error: 'No buzzer winner' })
+        const deduct = typeof payload?.deduct === 'number' ? payload.deduct : 0
+        if (deduct > 0) container.scoring.deduct(classId, winner, deduct)
+        container.buzzer.resolveAnswer(classId)
+        broadcastRoom(io, classId)
+        io.to(`room:${classId}`).emit('answer:result', {
+          classId,
+          teamName: winner,
+          correct: false,
+          pointsAwarded: -deduct,
+        })
+        io.to('admin').emit('answer:result', {
+          classId,
+          teamName: winner,
+          correct: false,
+          pointsAwarded: -deduct,
+        })
+        broadcastLeaderboard(io, classId)
         cb?.({ ok: true })
       }
     )
 
-    // ── Admin: adjust score directly ──────────────────────────────────────
     socket.on(
       'admin:adjustScore',
       (payload: { classId: ClassId; groupName: string; delta: number }, cb?: Function) => {
         if (!socket.data.isAdmin) return cb?.({ ok: false })
-        const room = adjustScore(payload.classId, payload.groupName, payload.delta)
-        broadcastRoom(io, payload.classId)
-        io.to('admin').emit('room:state', snapshot(room))
+        const classId = safeClassId(payload?.classId)
+        if (!classId || !payload?.groupName || typeof payload?.delta !== 'number') {
+          return cb?.({ ok: false, error: 'Invalid payload' })
+        }
+        container.scoring.adjust(classId, payload.groupName, payload.delta)
+        broadcastRoom(io, classId)
+        broadcastLeaderboard(io, classId)
         cb?.({ ok: true })
       }
     )
 
-    // ── Admin: next question ──────────────────────────────────────────────
-    socket.on('admin:nextQuestion', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:nextQuestion', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = nextQuestion(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.nextQuestion(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: reset question ─────────────────────────────────────────────
-    socket.on('admin:resetQuestion', (classId: ClassId, cb?: Function) => {
+    socket.on('admin:resetQuestion', (rawClassId: ClassId, cb?: Function) => {
       if (!socket.data.isAdmin) return cb?.({ ok: false })
-      const room = resetQuestion(classId)
+      const classId = safeClassId(rawClassId)
+      if (!classId) return cb?.({ ok: false, error: 'Invalid class' })
+      try {
+        container.quiz.resetQuestion(classId)
+      } catch (error) {
+        if (error instanceof ServiceError) return cb?.({ ok: false, error: error.message })
+        return cb?.({ ok: false })
+      }
       broadcastRoom(io, classId)
-      io.to('admin').emit('room:state', snapshot(room))
       cb?.({ ok: true })
     })
 
-    // ── Admin: poll current state for all rooms ───────────────────────────
     socket.on('admin:getStates', (cb: (states: RoomSnapshot[]) => void) => {
       if (!socket.data.isAdmin) return cb([])
-      cb(getAllRooms().map(snapshot))
+      cb((['ix', 'x', 'xi'] as ClassId[]).map((cid) => container.quiz.snapshot(cid)))
     })
 
-    // ── Student: poll current room state ─────────────────────────────────
     socket.on('room:getState', (cb: (state: RoomSnapshot | null) => void) => {
       const { classId } = socket.data
       if (!classId) return cb(null)
-      cb(snapshot(getRoom(classId)))
+      cb(container.quiz.snapshot(classId))
     })
 
-    // ── Disconnect: clean up connected-teams set ──────────────────────────
     socket.on('disconnect', () => {
       const { classId } = socket.data
       if (classId) {
-        const room = getRoom(classId)
-        room.connectedTeams.delete(socket.id)
+        container.quiz.removeConnected(classId, socket.id)
         broadcastRoom(io, classId)
-        io.to('admin').emit('room:state', snapshot(room))
       }
     })
   })
 
-  // ─── Start listening ──────────────────────────────────────────────────────
   httpServer.listen(port, () => {
     console.log(`\n▲ Tech Event server ready`)
     console.log(`  Local:   http://${hostname}:${port}`)
