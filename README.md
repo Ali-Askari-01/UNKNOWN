@@ -43,10 +43,10 @@ cp .env.example .env.local
 | `PORT` / `HOSTNAME` | Server bind (default `3000` / `localhost`) |
 | `CORS_ORIGIN` | Planned: allowed origin for credentialed Socket.IO handshakes |
 
-Generate the bcrypt hash with:
+Generate the bcrypt hash (base64-encoded — Next.js env loading mangles raw `$` characters):
 
 ```bash
-node -e "console.log(require('bcryptjs').hashSync('your-password', 10))"
+node -e "console.log('base64:' + Buffer.from(require('bcryptjs').hashSync('your-password', 10)).toString('base64'))"
 ```
 
 ### Run

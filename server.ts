@@ -7,12 +7,14 @@
  * All quiz state mutations happen here. Clients never mutate state directly.
  */
 
+import './server/bootstrap-als'
 import { createServer } from 'node:http'
 import { parse } from 'node:url'
 import next from 'next'
 import { Server as SocketIOServer, type Socket } from 'socket.io'
 import { parse as parseCookie } from 'cookie'
 import { verifySessionToken } from './lib/session'
+import { assertSessionSecretConfigured } from './lib/auth/index'
 
 import {
   type ClassId,
@@ -67,6 +69,8 @@ function broadcastRoom(io: SocketIOServer, classId: ClassId) {
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
+
+assertSessionSecretConfigured()
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {

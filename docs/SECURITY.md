@@ -64,7 +64,11 @@ Browser-side checks are UX only; all rules are enforced server-side.
 
 - `POST /api/join` and `buzzer:press` are the main abuse surfaces — plan: per-IP and
   per-socket rate limits; repeated invalid join attempts back off exponentially.
-- Admin credential brute force: login route will add per-IP delay after N failures.
+- Admin credential brute force: login route adds per-IP lockout after repeated failures (in-memory; resets on restart).
+- **Env quirk:** Next.js env loading mangles `$` characters in values, so `ADMIN_PASSWORD_HASH`
+  must be stored as `base64:<base64-of-bcrypt-hash>` (see `.env.example`). The server decodes it.
+- **Stateless logout:** tokens are HMAC-signed without a server-side revocation list; logout
+  clears the cookie but an already-issued token stays cryptographically valid until expiry (8h).
 
 ## Data Sensitivity
 
