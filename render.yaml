@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: unknown-web
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
+    startCommand: corepack pnpm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: FASTAPI_INTERNAL_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: unknown-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health/ready
+    envVars:
+      - key: BACKEND_ENVIRONMENT
+        value: production
+      - key: BACKEND_HOST
+        value: 0.0.0.0
+      - key: BACKEND_DATABASE_URL
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+      - key: BACKEND_TRUSTED_HOSTS
+        sync: false
+      - key: BACKEND_AUTH_SECRET
+        generateValue: true
+      - key: BACKEND_ADMIN_USERNAME
+        sync: false
+      - key: BACKEND_ADMIN_PASSWORD
+        sync: false
+      - key: BACKEND_ALLOW_DEV_ADMIN
+        value: "false"

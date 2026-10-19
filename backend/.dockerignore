@@ -1,0 +1,6 @@
+.env
+.pytest_cache
+*.pyc
+__pycache__/
+backend-dev.db
+unknown_fastapi_backend.egg-info/
