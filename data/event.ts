@@ -1,7 +1,7 @@
 export const classes = [
   { id: 'ix', roman: 'IX', label: 'CLASS IX', level: 'Foundation', language: 'Python', students: 'All students, including Biology', accent: 'aqua' },
   { id: 'x', roman: 'X', label: 'CLASS X', level: 'Matric', language: 'C++', students: 'Approximately 20 students', accent: 'blue' },
-  { id: 'xi', roman: 'XI', label: 'CLASS XI', level: 'First Year', language: 'C++', students: 'Approximately 10 students', accent: 'cream' },
+  { id: 'xi', roman: 'XI', label: 'CLASS XI', level: 'First Year', language: 'Python', students: 'Approximately 10 students', accent: 'cream' },
 ] as const
 
 export const rounds = [
@@ -21,7 +21,7 @@ export const scoreboard = [
 
 export const rules = [
   ['GENERAL RULES', 'One round takes place each week. Every round begins with a prep session. Teachers, committee members, and mentors have distinct responsibilities.'],
-  ['LEARNING STAGE', 'Weeks 1–4 are separate class competitions. IX uses Python. X and XI use C++.'],
+  ['LEARNING STAGE', 'Weeks 1–4 are separate class competitions. IX and XI use Python. X uses C++.'],
   ['TEAM FORMATION', 'Learning-stage groups stay within one class. Main-event mixed teams combine IX, X, and XI with equal representation where possible.'],
   ['MAIN EVENT', 'Weeks 5–6 combine Project and basic Competitive Programming. Project ideas need teacher or committee approval. Vibe coding is allowed.'],
   ['SCORING', 'Final score equals Project Points + CP Points. All teams participate in both main-event rounds. Ties remain ties unless a future tie-break rule is configured.'],

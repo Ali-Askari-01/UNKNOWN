@@ -91,6 +91,10 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | [REALTIME_EVENTS.md](docs/REALTIME_EVENTS.md) | Socket.IO event catalog |
 | [SECURITY.md](docs/SECURITY.md) | Auth, secrets, known gaps |
 | [TESTING.md](docs/TESTING.md) | Test strategy (Vitest, planned) |
+| [DATABASE_DESIGN.md](docs/DATABASE_DESIGN.md) | Requirements, ERD, SQL Server recommendation, and migration plan |
+
+The first relational schema baseline is stored at
+[`database/sqlserver/001_initial_schema.sql`](database/sqlserver/001_initial_schema.sql).
 
 ## API Quick Test
 
