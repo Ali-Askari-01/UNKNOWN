@@ -16,7 +16,7 @@ const rounds = [
 const tracks = [
   { roman: 'IX', label: 'CLASS IX', language: 'PYTHON', count: 'ALL STUDENTS', next: 'ERROR DEBUGGING', tone: 'blue' },
   { roman: 'X', label: 'CLASS X', language: 'C++', count: '≈ 20 STUDENTS', next: 'ERROR DEBUGGING', tone: 'aqua' },
-  { roman: 'XI', label: 'CLASS XI', language: 'C++', count: '≈ 10 STUDENTS', next: 'ERROR DEBUGGING', tone: 'cream' },
+  { roman: 'XI', label: 'CLASS XI', language: 'PYTHON', count: '≈ 10 STUDENTS', next: 'ERROR DEBUGGING', tone: 'cream' },
 ]
 
 function Button({ children, href = '#competition', secondary = false }: { children: React.ReactNode; href?: string; secondary?: boolean }) {
@@ -30,7 +30,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 const classTabs = [
   { id: 'ix' as const, label: 'CLASS IX',  roman: 'IX',  language: 'PYTHON', count: 5, students: 16, tone: 'blue' },
   { id: 'x'  as const, label: 'CLASS X',   roman: 'X',   language: 'C++',    count: 6, students: 18, tone: 'aqua' },
-  { id: 'xi' as const, label: 'CLASS XI',  roman: 'XI',  language: 'C++',    count: 3, students: 11, tone: 'cream' },
+  { id: 'xi' as const, label: 'CLASS XI',  roman: 'XI',  language: 'PYTHON', count: 3, students: 11, tone: 'cream' },
 ] as const
 
 function GroupsSection() {
@@ -130,7 +130,7 @@ export default function Page() {
 
       <section id="how-it-works" className="shell section-block"><div className="section-heading"><SectionLabel>01 // EVENT ARCHITECTURE</SectionLabel><h2>Two stages.<br /><span>One scoreboard.</span></h2></div><div className="stage-grid"><article className="stage-card stage-card-dark"><div className="card-index">STAGE 01</div><h3>LEARNING<br />STAGE</h3><p>Weeks 1–4. Students compete inside their respective classes and build the skills they need for the final challenge.</p><ul><li>Group Formation</li><li>MCQ Quiz</li><li>Presentation</li><li>Error Debugging</li></ul><div className="card-foot">PREP SESSION FIRST <span>→</span></div></article><article className="stage-card stage-card-light"><div className="card-index">STAGE 02</div><h3>MAIN<br />EVENT</h3><p>Weeks 5–6. IX, X and XI combine into mixed teams for the project and coding rounds.</p><ul><li>Project Competition</li><li>Competitive Programming</li><li>Combined Scoring</li><li>Final Ranking</li></ul><div className="card-foot">IX + X + XI <span>→</span></div></article></div></section>
 
-      <section id="competition" className="shell section-block"><div className="section-heading split-heading"><div><SectionLabel>02 // CLASS TRACKS</SectionLabel><h2>Choose your<br /><span>track.</span></h2></div><p>Separate learning paths. Shared ambition. Select a class to inspect its language, progress and next challenge.</p></div><div className="track-grid">{tracks.map((track) => <button type="button" key={track.roman} onClick={() => setActiveTrack(track.roman)} className={`track-card track-${track.tone} ${activeTrack === track.roman ? 'is-active' : ''}`}><div className="track-top"><span>{track.label}</span><span>→</span></div><div className="roman">{track.roman}</div><div className="track-meta"><div><small>LANGUAGE</small><strong>{track.language}</strong></div><div><small>STUDENTS</small><strong>{track.count}</strong></div></div><div className="track-progress"><span /><span /><span /><span className="empty" /><span className="empty" /><span className="empty" /></div><div className="track-next"><small>NEXT ROUND</small><strong>{track.next}</strong></div></button>)}</div><div className="track-detail"><span className="detail-code">TRACK // {activeTrack}</span><strong>{activeTrack === 'IX' ? 'Python debugging, all students included.' : `${activeTrack} students compete in C++ during the learning stage.`}</strong><Link href={`/dashboard/class/${activeTrack.toLowerCase()}`}>VIEW FULL TRACK →</Link></div></section>
+      <section id="competition" className="shell section-block"><div className="section-heading split-heading"><div><SectionLabel>02 // CLASS TRACKS</SectionLabel><h2>Choose your<br /><span>track.</span></h2></div><p>Separate learning paths. Shared ambition. Select a class to inspect its language, progress and next challenge.</p></div><div className="track-grid">{tracks.map((track) => <button type="button" key={track.roman} onClick={() => setActiveTrack(track.roman)} className={`track-card track-${track.tone} ${activeTrack === track.roman ? 'is-active' : ''}`}><div className="track-top"><span>{track.label}</span><span>→</span></div><div className="roman">{track.roman}</div><div className="track-meta"><div><small>LANGUAGE</small><strong>{track.language}</strong></div><div><small>STUDENTS</small><strong>{track.count}</strong></div></div><div className="track-progress"><span /><span /><span /><span className="empty" /><span className="empty" /><span className="empty" /></div><div className="track-next"><small>NEXT ROUND</small><strong>{track.next}</strong></div></button>)}</div><div className="track-detail"><span className="detail-code">TRACK // {activeTrack}</span><strong>{activeTrack === 'IX' || activeTrack === 'XI' ? 'Python debugging, all students included.' : 'Class X students compete in C++ during the learning stage.'}</strong><Link href={`/dashboard/class/${activeTrack.toLowerCase()}`}>VIEW FULL TRACK →</Link></div></section>
 
       <GroupsSection />
 

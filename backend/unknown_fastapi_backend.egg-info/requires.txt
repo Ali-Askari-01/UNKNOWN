@@ -1,0 +1,16 @@
+fastapi<1,>=0.115
+uvicorn[standard]<1,>=0.30
+pydantic-settings<3,>=2.6
+sqlalchemy[asyncio]<3,>=2.0.36
+alembic<2,>=1.14
+aioodbc<1,>=0.5
+pyodbc<6,>=5.1
+python-multipart<1,>=0.0.9
+
+[dev]
+aiosqlite<1,>=0.20
+httpx<1,>=0.27
+pytest<10,>=8
+pytest-asyncio<2,>=0.24
+ruff<1,>=0.8
+mypy<2,>=1.13

@@ -8,7 +8,7 @@
  * Clients never mutate state directly.
  */
 
-import './server/bootstrap-als'
+import './server/bootstrap-als.ts'
 import { createServer } from 'node:http'
 import { parse } from 'node:url'
 import next from 'next'

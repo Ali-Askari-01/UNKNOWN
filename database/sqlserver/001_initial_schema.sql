@@ -415,7 +415,7 @@ CREATE TABLE competition.score_entry (
     round_id uniqueidentifier NOT NULL,
     quiz_session_id uniqueidentifier NULL,
     answer_submission_id uniqueidentifier NULL,
-    points_delta int NOT NULL,
+    points_delta decimal(10,2) NOT NULL,
     reason varchar(40) NOT NULL CONSTRAINT ck_score_reason CHECK (reason IN ('ANSWER','PENALTY','BONUS','ADJUSTMENT','CORRECTION')),
     note nvarchar(500) NULL,
     created_by_user_id uniqueidentifier NULL,

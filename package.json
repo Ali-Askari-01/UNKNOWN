@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@12.3.4",
   "scripts": {
-    "dev": "node --import tsx/esm server.ts",
+    "dev": "tsx server.ts",
     "build": "next build",
     "start": "set NODE_ENV=production&& tsx server.ts"
   },

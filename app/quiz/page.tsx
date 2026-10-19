@@ -8,11 +8,14 @@ import type { RoomSnapshot } from '@/types'
 
 type ClassId = 'ix' | 'x' | 'xi'
 type JoinStep = 'select-class' | 'enter-code' | 'select-group' | 'in-room'
+type BackendClass = { code: string; display_name: string; preferred_language: string }
+type BackendTeam = { id: string; name: string; slogan?: string | null }
+type BackendSession = { id: string; class_code: string; status: string }
 
 const CLASS_META: Record<ClassId, { label: string; roman: string; language: string; tone: string }> = {
   ix:  { label: 'CLASS IX',  roman: 'IX',  language: 'PYTHON', tone: 'blue'  },
   x:   { label: 'CLASS X',   roman: 'X',   language: 'C++',    tone: 'aqua'  },
-  xi:  { label: 'CLASS XI',  roman: 'XI',  language: 'C++',    tone: 'cream' },
+  xi:  { label: 'CLASS XI',  roman: 'XI',  language: 'PYTHON', tone: 'cream' },
 }
 
 // ─── Countdown hook (client-rendered from server deadline) ───────────────────
@@ -230,9 +233,32 @@ export default function StudentQuizPage() {
   const [room, setRoom] = useState<RoomSnapshot | null>(null)
   const [myGroup, setMyGroup] = useState('')
   const [connected, setConnected] = useState(false)
+  const [backendClasses, setBackendClasses] = useState<BackendClass[]>([])
+  const [backendGroups, setBackendGroups] = useState<BackendTeam[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/v1/classes')
+      .then((response) => response.ok ? response.json() as Promise<BackendClass[]> : [])
+      .then((items) => { if (!cancelled) setBackendClasses(items) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
+
+  const availableClasses = (backendClasses.length ? backendClasses.map((item) => item.code.toLowerCase()) : ['ix', 'x', 'xi']) as ClassId[]
+
+  useEffect(() => {
+    if (!selectedClass) { setBackendGroups([]); return }
+    let cancelled = false
+    fetch(`/api/v1/teams?class_code=${selectedClass.toUpperCase()}`)
+      .then((response) => response.ok ? response.json() as Promise<BackendTeam[]> : [])
+      .then((items) => { if (!cancelled) setBackendGroups(items) })
+      .catch(() => { if (!cancelled) setBackendGroups([]) })
+    return () => { cancelled = true }
+  }, [selectedClass])
 
   const classGroups = selectedClass
-    ? groups.filter((g) => g.classId === selectedClass).map((g) => g.name)
+    ? (backendGroups.length ? backendGroups.map((team) => team.name) : groups.filter((g) => g.classId === selectedClass).map((g) => g.name))
     : []
 
   // Socket reconnection: re-join room on reconnect
@@ -271,14 +297,45 @@ export default function StudentQuizPage() {
     }
   }, [selectedClass, roomCode, myGroup])
 
-  const handleJoin = useCallback(() => {
+  const handleJoin = useCallback(async () => {
     if (!selectedClass || !roomCode || !selectedGroup) return
     setJoinError('')
     setJoining(true)
+    const normalizedCode = roomCode.trim().toUpperCase()
+    const selectedBackendTeam = backendGroups.find((team) => team.name === selectedGroup)
+    try {
+      const sessionResponse = await fetch(`/api/v1/quiz-sessions/by-code/${encodeURIComponent(normalizedCode)}`)
+      if (sessionResponse.ok) {
+        const backendSession = await sessionResponse.json() as BackendSession
+        if (backendSession.class_code.toLowerCase() !== selectedClass) {
+          setJoining(false)
+          setJoinError(`This room is configured for Class ${backendSession.class_code}.`)
+          return
+        }
+        if (!selectedBackendTeam) {
+          setJoining(false)
+          setJoinError('This team is not available in the database-backed event edition.')
+          return
+        }
+        const participantResponse = await fetch(`/api/v1/quiz-sessions/${backendSession.id}/participants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ team_id: selectedBackendTeam.id }),
+        })
+        if (!participantResponse.ok) {
+          const errorBody = await participantResponse.json().catch(() => ({})) as { detail?: string }
+          setJoining(false)
+          setJoinError(errorBody.detail ?? 'Could not register the team for this quiz.')
+          return
+        }
+      }
+    } catch {
+      // The legacy Socket.IO room remains available when FastAPI is offline.
+    }
     const socket = getSocket()
     socket.emit(
       'room:join',
-      { classId: selectedClass, code: roomCode.trim().toUpperCase(), groupName: selectedGroup },
+      { classId: selectedClass, code: normalizedCode, groupName: selectedGroup },
       (res: { ok: boolean; error?: string; state?: RoomSnapshot }) => {
         setJoining(false)
         if (!res.ok) { setJoinError(res.error ?? 'Could not join.'); return }
@@ -318,8 +375,9 @@ export default function StudentQuizPage() {
         <div className="sp-step">
           <p className="sp-step-label">STEP 1 — SELECT YOUR CLASS</p>
           <div className="sp-class-grid">
-            {(['ix', 'x', 'xi'] as ClassId[]).map((cid) => {
+            {availableClasses.map((cid) => {
               const meta = CLASS_META[cid]
+              const backendClass = backendClasses.find((item) => item.code.toLowerCase() === cid)
               return (
                 <button
                   key={cid}
@@ -329,7 +387,7 @@ export default function StudentQuizPage() {
                 >
                   <span className="sp-class-roman">{meta.roman}</span>
                   <span className="sp-class-label">{meta.label}</span>
-                  <span className="sp-class-lang">{meta.language}</span>
+                  <span className="sp-class-lang">{backendClass?.preferred_language?.toUpperCase() ?? meta.language}</span>
                 </button>
               )
             })}

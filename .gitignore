@@ -18,3 +18,10 @@ tsconfig.tsbuildinfo
 
 # Local environment
 .env.local
+
+# FastAPI local development
+backend/.venv/
+backend/.pytest_cache/
+backend/__pycache__/
+backend/backend-dev.db
+backend/.env

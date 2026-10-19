@@ -111,6 +111,20 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 The first relational schema baseline is stored at
 [`database/sqlserver/001_initial_schema.sql`](database/sqlserver/001_initial_schema.sql).
 
+## FastAPI backend foundation
+
+The Phase 1 backend foundation is in [`backend/`](backend/README.md). It currently provides
+configuration, request IDs, consistent validation errors, async database readiness, and test
+coverage. It defaults to SQLite for local foundation tests and supports SQL Server through
+`mssql+aioodbc` when `BACKEND_DATABASE_URL` is configured.
+
+For local integration, start FastAPI on port 8000 and the Next.js app on port 3000. Next.js
+proxies `/api/v1/*` to FastAPI through `FASTAPI_INTERNAL_URL` (default:
+`http://127.0.0.1:8000`).
+
+The custom Socket.IO server is launched with `tsx server.ts`; this is required for the current
+Node 24 environment and keeps the existing realtime quiz path available during migration.
+
 ## API Quick Test
 
 ```bash
