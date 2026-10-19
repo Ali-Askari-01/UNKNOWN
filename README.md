@@ -92,6 +92,21 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | [SECURITY.md](docs/SECURITY.md) | Auth, secrets, known gaps |
 | [TESTING.md](docs/TESTING.md) | Test strategy (Vitest, planned) |
 | [DATABASE_DESIGN.md](docs/DATABASE_DESIGN.md) | Requirements, ERD, SQL Server recommendation, and migration plan |
+| [PRD.md](docs/PRD.md) | Product requirements, roles, workflows, and success criteria |
+| [TRD.md](docs/TRD.md) | FastAPI, SQL Server, security, deployment, and technical requirements |
+| [DATABASE_REQUIREMENTS.md](docs/DATABASE_REQUIREMENTS.md) | Data ownership, integrity, transactions, and retention |
+| [DATABASE_DATA_DICTIONARY.md](docs/DATABASE_DATA_DICTIONARY.md) | Entity purpose, fields, and derived views |
+| [DATABASE_MIGRATION_AND_SEEDING.md](docs/DATABASE_MIGRATION_AND_SEEDING.md) | Migration, import, rollback, and environments |
+| [DATABASE_SECURITY_OPERATIONS.md](docs/DATABASE_SECURITY_OPERATIONS.md) | Access, privacy, backups, monitoring, and operations |
+| [DATABASE_TESTING.md](docs/DATABASE_TESTING.md) | Database correctness, quality, and performance tests |
+| [FASTAPI_ARCHITECTURE.md](docs/FASTAPI_ARCHITECTURE.md) | Target Python backend structure and boundaries |
+| [FASTAPI_API_CONTRACT.md](docs/FASTAPI_API_CONTRACT.md) | Versioned REST contract and compatibility strategy |
+| [FASTAPI_REALTIME_AND_AUTH.md](docs/FASTAPI_REALTIME_AND_AUTH.md) | Tokens, websocket events, reconnects, and buzzer correctness |
+| [FASTAPI_SECURITY.md](docs/FASTAPI_SECURITY.md) | FastAPI threat model and security controls |
+| [FASTAPI_TESTING_DEPLOYMENT.md](docs/FASTAPI_TESTING_DEPLOYMENT.md) | Test layers, deployment, CI, and release checklist |
+| [DATABASE_IMPLEMENTATION_PLAN.md](docs/DATABASE_IMPLEMENTATION_PLAN.md) | Phase-by-phase SQL Server implementation |
+| [FASTAPI_MIGRATION_PLAN.md](docs/FASTAPI_MIGRATION_PLAN.md) | Phase-by-phase backend migration |
+| [IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md) | Master sequencing, gates, and missing decisions |
 
 The first relational schema baseline is stored at
 [`database/sqlserver/001_initial_schema.sql`](database/sqlserver/001_initial_schema.sql).
