@@ -10,7 +10,7 @@ Frontend: existing Next.js App Router application
 ```text
 Browser
   ├── HTTPS/JSON ───────► FastAPI REST API
-  └── WebSocket/Socket.IO ► FastAPI realtime gateway
+  └── Native WebSocket ► FastAPI realtime gateway
                               │
                               ├── Application services
                               ├── Authorization/policy layer
@@ -19,7 +19,9 @@ Browser
                               └── Object storage for media
 ```
 
-FastAPI becomes the only authority for mutations. Next.js remains responsible for page rendering and browser UX. The existing TypeScript server is retired only after endpoint and realtime parity is proven.
+FastAPI is the only authority for mutations. Next.js remains responsible for page rendering and
+browser UX. The former TypeScript/Socket.IO server has been retired after endpoint and realtime
+parity was proven.
 
 ## 2. Recommended Python stack
 
@@ -78,7 +80,10 @@ Each service depends on repository interfaces and policy interfaces, not on SQLA
 - Separate development, staging, and production configurations.
 - Container image or reproducible process definition for FastAPI.
 - Reverse proxy/managed ingress terminates HTTPS and forwards trusted headers.
-- One worker/process is used for in-memory websocket coordination until a shared realtime adapter is introduced; horizontal scaling requires Redis or another shared broker.
+- WebSocket connection state is process-local, while committed events are relayed through the
+  SQL-backed realtime event ledger. Production horizontal scaling still requires the documented
+  multi-worker soak. API rate-limit state also uses a shared SQL store when multiple workers are
+  deployed.
 - Readiness must fail if required secrets or database connectivity are unavailable.
 - Logs must not contain passwords, tokens, answer keys, or student private data.
 

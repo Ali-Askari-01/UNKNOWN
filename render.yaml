@@ -15,13 +15,7 @@ services:
         value: 0.0.0.0
       - key: FASTAPI_INTERNAL_URL
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: ADMIN_USERNAME
-        sync: false
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
-      - key: CORS_ORIGIN
+      - key: NEXT_PUBLIC_FASTAPI_WS_URL
         sync: false
 
   - type: web
@@ -30,12 +24,14 @@ services:
     plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    healthCheckPath: /api/v1/health/ready
+    healthCheckPath: /health/ready
     envVars:
       - key: BACKEND_ENVIRONMENT
         value: production
       - key: BACKEND_HOST
         value: 0.0.0.0
+      - key: BACKEND_WORKERS
+        value: "1"
       - key: BACKEND_DATABASE_URL
         sync: false
       - key: BACKEND_CORS_ORIGINS
@@ -46,7 +42,11 @@ services:
         generateValue: true
       - key: BACKEND_ADMIN_USERNAME
         sync: false
-      - key: BACKEND_ADMIN_PASSWORD
+      - key: BACKEND_ADMIN_PASSWORD_HASH
         sync: false
       - key: BACKEND_ALLOW_DEV_ADMIN
         value: "false"
+      - key: BACKEND_RUN_MIGRATIONS
+        value: "false"
+      - key: BACKEND_LOG_LEVEL
+        value: INFO

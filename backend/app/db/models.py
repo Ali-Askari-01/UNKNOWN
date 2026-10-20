@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -44,6 +44,7 @@ class Team(Base):
     id: Mapped[UUID] = mapped_column("team_id", Uuid, primary_key=True, default=uuid4)
     event_edition_id: Mapped[UUID] = mapped_column(ForeignKey("competition.event_edition.event_edition_id"))
     name: Mapped[str] = mapped_column(String(120))
+    registration_order: Mapped[Optional[int]] = mapped_column(SmallInteger)
     slogan: Mapped[Optional[str]] = mapped_column(String(240))
     team_type: Mapped[str] = mapped_column(String(20), default="LEARNING")
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -67,10 +68,14 @@ class TeamClass(Base):
 
 class Student(Base):
     __tablename__ = "student"
-    __table_args__ = {"schema": "competition"}
+    __table_args__ = (
+        UniqueConstraint("event_edition_id", "student_reference", name="uq_student_reference"),
+        {"schema": "competition"},
+    )
 
     id: Mapped[UUID] = mapped_column("student_id", Uuid, primary_key=True, default=uuid4)
     event_edition_id: Mapped[UUID] = mapped_column(ForeignKey("competition.event_edition.event_edition_id"))
+    student_reference: Mapped[Optional[str]] = mapped_column(String(80))
     display_name: Mapped[str] = mapped_column(String(120))
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -90,6 +95,55 @@ class TeamMember(Base):
     student: Mapped[Student] = relationship()
 
 
+class RateLimitEvent(Base):
+    __tablename__ = "rate_limit_event"
+    __table_args__ = (Index("ix_rate_limit_event_bucket_time", "bucket_key", "occurred_at"), {"schema": "competition"})
+
+    id: Mapped[UUID] = mapped_column("rate_limit_event_id", Uuid, primary_key=True, default=uuid4)
+    bucket_key: Mapped[str] = mapped_column(String(240))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_bucket"
+    __table_args__ = {"schema": "competition"}
+
+    bucket_key: Mapped[str] = mapped_column(String(240), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_record"
+    __table_args__ = (UniqueConstraint("scope_key", "idempotency_key", name="uq_idempotency_scope_key"), {"schema": "competition"})
+
+    id: Mapped[UUID] = mapped_column("idempotency_record_id", Uuid, primary_key=True, default=uuid4)
+    scope_key: Mapped[str] = mapped_column(String(240))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response_json: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QuizRealtimeEvent(Base):
+    __tablename__ = "quiz_realtime_event"
+    __table_args__ = (Index("ix_quiz_realtime_event_session_id", "session_id"), {"schema": "competition"})
+
+    id: Mapped[int] = mapped_column("realtime_event_id", Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_session.quiz_session_id"))
+    event_type: Mapped[str] = mapped_column(String(80))
+    payload_json: Mapped[str] = mapped_column(Text)
+    should_broadcast: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QuizRealtimeRelayLock(Base):
+    __tablename__ = "quiz_realtime_relay_lock"
+    __table_args__ = {"schema": "competition"}
+
+    id: Mapped[int] = mapped_column("lock_id", Integer, primary_key=True, autoincrement=False)
+    version: Mapped[int] = mapped_column("lock_version", Integer, nullable=False, default=0)
+
+
 class Question(Base):
     __tablename__ = "question"
     __table_args__ = {"schema": "competition"}
@@ -101,6 +155,7 @@ class Question(Base):
     prompt: Mapped[str] = mapped_column(Text)
     code_snippet: Mapped[Optional[str]] = mapped_column(Text)
     explanation: Mapped[Optional[str]] = mapped_column(Text)
+    accepted_answers: Mapped[Optional[str]] = mapped_column(Text)
     default_points: Mapped[int] = mapped_column(Integer, default=10)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -167,6 +222,7 @@ class Round(Base):
     round_type: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(20), default="DRAFT")
     description: Mapped[Optional[str]] = mapped_column(String(1000))
+    max_points: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
 
 
 class QuizBlueprint(Base):
@@ -206,6 +262,7 @@ class QuizSession(Base):
     blueprint_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_blueprint.blueprint_id"))
     quiz_code: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(20), default="WAITING")
+    version_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -226,11 +283,30 @@ class QuizQuestion(Base):
     question_id: Mapped[UUID] = mapped_column(ForeignKey("competition.question.question_id"))
     question_order: Mapped[int] = mapped_column(Integer)
     prompt_snapshot: Mapped[str] = mapped_column(Text)
+    code_snippet_snapshot: Mapped[Optional[str]] = mapped_column(Text)
+    question_type_snapshot: Mapped[str] = mapped_column(String(30), default="MCQ", server_default="MCQ")
+    accepted_answers_snapshot: Mapped[Optional[str]] = mapped_column(Text)
     points_snapshot: Mapped[int] = mapped_column(Integer, default=10)
     answer_key_snapshot: Mapped[Optional[str]] = mapped_column(Text)
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     session: Mapped[QuizSession] = relationship(back_populates="questions")
     question: Mapped[Question] = relationship()
+
+
+class BuzzerPress(Base):
+    __tablename__ = "buzzer_press"
+    __table_args__ = (
+        Index("ux_buzzer_one_winner", "quiz_question_id", unique=True, sqlite_where=text("is_winner = 1"), mssql_where=text("is_winner = 1")),
+        {"schema": "competition"},
+    )
+
+    id: Mapped[UUID] = mapped_column("buzzer_press_id", Uuid, primary_key=True, default=uuid4)
+    quiz_question_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_question.quiz_question_id"))
+    participant_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_participant.participant_id"))
+    pressed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class QuizParticipant(Base):
@@ -251,11 +327,13 @@ class AnswerSubmission(Base):
     id: Mapped[UUID] = mapped_column("answer_submission_id", Uuid, primary_key=True, default=uuid4)
     quiz_question_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_question.quiz_question_id"))
     participant_id: Mapped[UUID] = mapped_column(ForeignKey("competition.quiz_participant.participant_id"))
+    buzzer_press_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("competition.buzzer_press.buzzer_press_id"))
     submitted_answer: Mapped[str] = mapped_column(Text)
     is_final: Mapped[bool] = mapped_column(Boolean, default=True)
     is_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
     awarded_points: Mapped[int] = mapped_column(Integer, default=0)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    judged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class ScoreEntry(Base):

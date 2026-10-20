@@ -1,141 +1,70 @@
-# Architecture
+# Current Architecture
 
-> Status: Phase 2 design. Implementation lands in Phases 3–8.
-> The pre-refactor runtime (`server.ts` + `lib/quiz-state.ts` owning all state)
-> was retired in Phase 8; the service-backed runtime is live.
+Status: implemented service-backed runtime. This document describes the production path; the
+retired Node/Socket.IO and in-memory implementation is not part of the application.
 
-## Design Goals
+## Runtime topology
 
-1. No database in this phase — in-memory repositories behind interfaces.
-2. Business logic (services) fully separated from storage (repositories) so a persistent
-   repository can replace the in-memory one later without touching services or APIs.
-3. Server-authoritative quiz logic: timers, buzzer winner selection, and scoring are
-   decided only on the server.
-4. Existing UI files are adapted, not rewritten.
-
-## Proposed Folder Structure
-
-Existing directories (`app/`, `lib/`, `components/`, `data/`, `public/`) stay at the repo
-root (the `@/*` alias maps to `./*`). New backend code is added alongside them:
-
-```
-app/
-  api/                          # Next.js Route Handlers (HTTP API)
-    admin/                      #   existing: login, logout, me
-    classes/                    #   class tracks CRUD (Phase 5)
-    teams/                      #   team management (Phase 5)
-    questions/                  #   question bank (Phase 5)
-    quizzes/                    #   quiz lifecycle + codes (Phase 5)
-    join/                       #   student join endpoint (Phase 5)
-    answer/                     #   answer submission (Phase 7)
-    leaderboard/                #   score query (Phase 7)
-lib/
-  auth/                         # session tokens, guards, password hashing (Phase 4)
-  validation/                   # Zod schemas for every API/socket payload (Phase 3)
-  session.ts                    # existing HMAC session util (kept, moved logic to lib/auth)
-  socket-client.ts              # existing browser socket singleton (unchanged)
-  utils.ts                      # existing cn() helper (unchanged)
-server/
-  services/                     # business logic (Phases 3, 6, 7)
-    quiz-service.ts             #   lifecycle: open/start/pause/resume/finish, question flow
-    buzzer-service.ts           #   activate/press/timeout/reopen, atomic first-winner
-    scoring-service.ts          #   award/deduct, score calculation
-    team-service.ts             #   class + team CRUD rules
-    question-service.ts         #   question CRUD rules
-    leaderboard-service.ts      #   ranking projection
-  repositories/                 # storage interfaces + in-memory implementations (Phase 3)
-    types.ts                    #   repository interfaces (TeamRepo, QuestionRepo, …)
-    in-memory/                  #   Map-backed implementations
-  realtime/                     # Socket.IO wiring (Phase 6)
-    socket-server.ts            #   server construction, auth middleware
-    handlers/                   #   one module per event family (room, buzzer, admin, quiz)
-types/
-  index.ts                      # shared domain + API types (Phase 3)
-tests/                          # Vitest (Phase 9)
-  unit/  integration/
-docs/                           # this folder
+```text
+Browser
+  ├─ Next.js landing, auth, admin and student pages
+  ├─ same-origin /api/v1/* rewrite ───────► FastAPI
+  └─ native WebSocket /api/v1/ws/* ───────► FastAPI
+                                               ├─ SQLAlchemy async session
+                                               └─ SQL Server / SQLite development database
 ```
 
-`lib/quiz-state.ts` logic was **migrated** into services/repositories (not duplicated);
-the file was deleted in Phase 8 once the socket handlers and frontend were wired to
-the service layer.
+Next.js is the presentation and same-origin proxy layer. FastAPI is the sole authority for
+authentication, quiz lifecycle, team participation, question data, buzzer arbitration, answer
+judging, scoring, leaderboards, audit records, and realtime snapshots.
 
-## Service Boundaries
+## Backend boundaries
 
-| Service | Responsibility | Depends on |
-|---|---|---|
-| `TeamService` | Class/team CRUD, membership rules | `TeamRepository` |
-| `QuestionService` | Question CRUD, per-class ordering | `QuestionRepository` |
-| `QuizService` | Quiz lifecycle, current question pointer, joining rules, room codes | `QuizRepository`, `RoomRepository`, `QuestionService`, `BuzzerService`, `ScoringService` |
-| `BuzzerService` | Buzzer open/lock/expiry, atomic first-winner selection, 20s answer window, timeout + reopen | `RoomRepository` (timer handles kept in memory) |
-| `ScoringService` | Award/deduct points, recompute team totals | `QuizRepository` |
-| `LeaderboardService` | Sorted ranking projection for a class | `ScoringService` data |
+- `app/api/v1/` contains versioned HTTP and WebSocket adapters.
+- `app/core/` contains settings, authentication, request IDs, rate limiting, error handling, and
+  structured request logging.
+- `app/db/` contains SQLAlchemy models and the async engine/session factory.
+- `app/repositories/` contains persistence queries and domain-facing data access.
+- `migrations/` contains reviewed Alembic revisions.
+- `scripts/` contains bounded operational checks and seed/load tools.
 
-Services never import from `server/repositories/in-memory/*` directly — only from the
-interfaces in `server/repositories/types.ts`. The composition root (a small
-`server/container.ts`) binds in-memory implementations for now.
+The browser never supplies authoritative score, winner, participant identity, answer correctness,
+or lifecycle state. The backend derives those values from authenticated identity and persisted
+state.
 
-## Data Flow
+## Authentication and authorization
 
-```
-Browser (admin) ──HTTP──► Route Handler ──► Zod validation ──► Service ──► Repository
-Browser (student) ──WS───► Socket handler ──► Zod validation ──► Service ──► Repository
-                                   ▲                                  │
-                                   └──── broadcast room:state ◄──────┘
-```
+- Admin login verifies a bcrypt hash and issues a signed, HttpOnly cookie.
+- Team join validates quiz code, session, class, and team membership before issuing a scoped,
+  HttpOnly team cookie.
+- HTTP mutations and WebSocket connections require the appropriate signed identity.
+- Production rejects default secrets, SQLite, missing bcrypt admin hashes, and development admin
+  bypass.
+- CORS is an explicit allowlist and trusted hosts are configured separately.
 
-- HTTP is used for CRUD, login, join, and anything that must work without a socket.
-- Socket.IO carries live quiz control and buzzer traffic; every mutation still goes
-  through the same service layer, then broadcasts `room:state` snapshots.
+## Quiz consistency
 
-## Authentication Design
+- Lifecycle transitions are persisted and audited.
+- Buzzer presses are persisted with a database-enforced one-winner constraint per question.
+- Answer submissions remain pending until an authenticated administrator judges them.
+- Only judged answers produce score ledger entries.
+- Public responses omit answer keys, private fields, and future questions.
+- Realtime messages are sanitized snapshots/events with sequence numbers; clients are renderers,
+  not authorities.
 
-### Admin
-- Single account from env: `ADMIN_USERNAME` + `ADMIN_PASSWORD_HASH` (bcrypt).
-- On login, server issues an HMAC-SHA256 signed session token in an HttpOnly,
-  SameSite=Lax cookie (`quiz_admin_session`, 8h expiry).
-- Enforcement layers:
-  1. `proxy.ts` (Edge) — cheap cookie-presence gate for `/admin/*` and `/api/admin/*`.
-  2. Route handlers — full signature verification on every admin API.
-  3. Socket.IO middleware — `socket.data.role = 'admin'` set from handshake cookie;
-     every `admin:*` event checks it server-side.
-- Hardening vs current code: constant-time signature compare, refuse to start in
-  production without `SESSION_SECRET`, restricted Socket.IO CORS origin.
+## Operations
 
-### Student (Phase 5)
-- Students are **teams**, not user accounts. On successful join
-  (`classId` + valid quiz code + known group name), the server issues a short-lived
-  team-scoped signed token (same HMAC scheme, distinct cookie/localStorage key).
-- Socket handshake carries the team token; `socket.data.team` identifies the caller.
-  Students can only press the buzzer / submit answers for their own team.
-- The quiz code is a shared secret per room, rotated by the admin; it is not a
-  credential by itself once a team holds a token.
+- Web containers do not migrate the database by default. Set `BACKEND_RUN_MIGRATIONS=true` only
+  for a controlled migration operation; normal releases use a separate migration identity.
+- SQL-backed rate-limit events and locked bucket rows coordinate multiple API workers.
+- Production/staging SQL Server engines use bounded connection pools configured by
+  `BACKEND_DB_POOL_SIZE`, `BACKEND_DB_MAX_OVERFLOW`, `BACKEND_DB_POOL_TIMEOUT`, and
+  `BACKEND_DB_POOL_RECYCLE`; local/test engines use `NullPool` for loop isolation.
+- Every request receives or preserves an `x-request-id`; structured logs include request ID, route,
+  status, and duration without cookies or request bodies.
+- `/health/live` checks process liveness and `/health/ready` checks database readiness.
+- Release order, backup/restore rehearsal, migration verification, smoke tests, and rollback
+  controls are documented in [PRODUCTION_RELEASE_RUNBOOK.md](PRODUCTION_RELEASE_RUNBOOK.md).
 
-## Real-time Architecture
-
-- Single Socket.IO server attached to the existing custom HTTP server (`server.ts`).
-- Rooms: `room:{classId}` for participants, `admin` for the admin panel.
-- All authority lives server-side:
-  - Buzzer winner: first accepted `buzzer:press` per question is stored atomically in
-    the service; later presses are rejected. Simultaneous presses are serialized by
-    Node's single-threaded event loop — the first event handler to commit wins.
-  - Timers: `setTimeout` on the server marks answers expired at T+20s and broadcasts
-    `buzzer:expired`; clients never run authoritative clocks (they only render a
-    countdown from the server-provided `answerDeadline`).
-- Snapshot model: after every mutation the server emits `room:state` with a full
-  sanitized snapshot; clients are stateless renderers.
-
-See `docs/REALTIME_EVENTS.md` for the event catalog and `docs/QUIZ_FLOW.md` for the
-end-to-end round sequence.
-
-## Legacy Runtime (audited in Phase 1 — removed in Phase 8)
-
-- `server.ts` — custom Next + Socket.IO server; all event handlers inline.
-- `lib/quiz-state.ts` — singleton in-memory state machine, 3 hardcoded rooms
-  (`IX2026`, `X2026`, `XI2026`), scores seeded from `data/event.ts` groups.
-- `proxy.ts` — Edge cookie-presence gate.
-- `lib/session.ts` — HMAC session tokens.
-
-This runtime kept working during Phases 3–7; the refactor landed in Phase 8, when the
-socket handlers and frontend were rewired to the service-backed handlers and
-`lib/quiz-state.ts` was deleted.
+See [REALTIME_EVENTS.md](REALTIME_EVENTS.md), [QUIZ_FLOW.md](QUIZ_FLOW.md), and
+[INTEGRATION_AUDIT.md](INTEGRATION_AUDIT.md) for the detailed contracts and current evidence.

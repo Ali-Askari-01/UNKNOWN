@@ -4,7 +4,9 @@
 
 - TLS at the ingress; secure cookies and trusted proxy configuration.
 - Strict CORS allowlist for the deployed frontend origin.
-- Rate limits on login, join, buzzer, answer, imports, and media upload endpoints.
+- Rate limits on login, join, buzzer, answer, imports, and media upload endpoints. Login, join,
+  buzzer, and answer limits use SQL-backed sliding windows with locked per-bucket coordination, so
+  multiple API workers observe the same abuse window.
 - Argon2id/bcrypt password hashing with a rotation/recovery procedure.
 - Request size limits and MIME/content validation for uploads.
 - Authorization checks in services, not only router or frontend gates.

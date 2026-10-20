@@ -168,6 +168,6 @@ export default { classes, rounds, scoreboard, rules, announcements, roles }
 // Prisma-ready model sketch. Move to prisma/schema.prisma when database provisioning is enabled.
 export const prismaModelSketch = `User, StudentProfile, ClassTrack, Group, GroupMember, MixedTeam, MixedTeamMember, Round, PrepSession, MCQQuestion, PresentationAssignment, DebugChallenge, Project, ProjectEvaluation, CPProblem, Score, Announcement, ScheduleItem, AuditLog, SiteSetting`
 
-export const authArchitecture = { studentLogin: '/login', adminLogin: '/admin/login', protectedAdminPrefix: '/admin/*', adminApiPrefix: '/api/admin/*', roles: ['SUPER_ADMIN', 'ADMIN', 'TEACHER', 'COMMITTEE', 'MENTOR', 'STUDENT'] }
+export const authArchitecture = { studentLogin: '/login', adminLogin: '/admin/login', protectedAdminPrefix: '/admin/*', adminApiPrefix: '/api/v1/admin/*', roles: ['SUPER_ADMIN', 'ADMIN', 'TEACHER', 'COMMITTEE', 'MENTOR', 'STUDENT'] }
 
-export const adminSeed = { usernameEnv: 'ADMIN_USERNAME', passwordEnv: 'ADMIN_PASSWORD', defaultUsername: 'admin', passwordStorage: 'bcrypt or argon2 hash', role: 'SUPER_ADMIN' }
+export const adminSeed = { usernameEnv: 'BACKEND_ADMIN_USERNAME', passwordEnv: 'BACKEND_ADMIN_PASSWORD_HASH', defaultUsername: 'admin', passwordStorage: 'bcrypt hash', role: 'SUPER_ADMIN' }

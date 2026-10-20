@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.core.config import get_settings
+from app.realtime.manager import connection_manager
 
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
@@ -14,6 +15,8 @@ async def system_status() -> dict[str, object]:
         "apiVersion": "v1",
         "environment": settings.environment,
         "databaseConfigured": bool(settings.database_url),
-        "realtime": "socketio-compatibility-bridge",
+        "realtime": "native-websocket",
+        "realtimeRelay": connection_manager.health_snapshot(),
+        "workers": settings.workers,
         "frontendMigration": "fastapi-data-plane-connected",
     }

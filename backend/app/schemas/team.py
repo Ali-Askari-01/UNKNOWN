@@ -26,3 +26,12 @@ class TeamResponse(BaseModel):
     slogan: str | None
     team_type: str
     members: list[TeamMemberResponse]
+
+
+class EventStandingResponse(BaseModel):
+    team_id: UUID
+    team_name: str
+    class_code: str
+    score: float | None
+    completed_rounds: int
+    is_provisional: bool

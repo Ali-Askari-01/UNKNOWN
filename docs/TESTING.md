@@ -1,51 +1,49 @@
-# Testing
+# Testing and Verification
 
-> Status: Phase 2 plan. Test infrastructure lands in Phase 9 (Vitest).
+## Automated gate
 
-## Tooling (planned)
+```powershell
+corepack pnpm check
+```
 
-- **Vitest** as the test runner (fast, TS-native, works with pnpm).
-- `tests/unit/` — services, validation schemas, session tokens.
-- `tests/integration/` — repository + service wiring, socket event flows against an
-  in-memory Socket.IO server.
-- Scripts (to be added): `pnpm test`, `pnpm test:watch`, `pnpm test:coverage`.
+This runs strict frontend TypeScript validation, FastAPI Ruff/tests, and the production Next.js
+build. Backend-only checks are available with `python -m ruff check app tests scripts migrations` and
+`python -m pytest -q` from `backend/`.
 
-No tests exist in the repository yet.
+CI also runs `pnpm audit --prod --audit-level moderate`; the production dependency graph is kept
+free of known moderate-or-higher advisories through workspace-level patched-version overrides.
 
-## What Will Be Covered
+CI also builds the production FastAPI Docker image so the Render deployment artifact is checked,
+including the explicit migration-disabled-by-default entrypoint, and starts that image with two
+workers to verify the container liveness endpoint and process lifecycle.
+CI also renders the complete Alembic chain in offline mode, which validates every revision without
+requiring a SQL Server service in the test runner.
+CI also starts a clean SQLite FastAPI process and runs the full E2E smoke against it, covering
+authentication, lifecycle, join, realtime authentication, ping/pong, reconnect snapshots, answer
+judging, idempotency, and leaderboard output.
+CI also runs a bounded two-iteration, two-concurrent-session soak against a two-worker SQLite
+service using
+`backend/scripts/quiz_soak_smoke.py`.
 
-### Unit
-- Zod schemas: accept valid payloads, reject unknown/oversized/missing fields.
-- `ScoringService`: award, deduct, manual adjust, tiebreak ordering.
-- `BuzzerService`:
-  - first press wins; second press rejected;
-  - press after expiry rejected; press by already-buzzed team rejected;
-  - 20s window fires exactly once (fake timers);
-  - reopen excludes already-buzzed teams.
-- `QuizService` lifecycle: invalid transitions (e.g. start→start) return 409-equivalent
-  errors; pause cancels timers.
-- Session tokens: create/verify round-trip; tampered signature rejected;
-  expired token rejected.
+## Coverage expectations
 
-### Integration
-- Simultaneous buzzer presses: fire N parallel `buzzer:press` events through the real
-  Socket.IO server; assert **exactly one** ack `{ ok: true }` and one winner.
-- Admin permission matrix: every `admin:*` event with a non-admin socket → forbidden;
-  with admin socket → ok.
-- Join flow: wrong code, unknown group, valid join, rotate code → old code fails.
-- Leaderboard: sequence of correct/incorrect/adjust events → expected ranking.
+- Authentication identity, bcrypt verification, production configuration rejection, and logout.
+- Public question privacy and authorized admin answer-key access.
+- Blueprint and quiz-session lifecycle transitions.
+- Team/session ownership, pending answers, judging, score ledger, and audit records.
+- Concurrent buzzer presses with exactly one database-confirmed winner.
+- Question creation rejects invalid class-track references.
+- SQL Server readiness, migration state, backup verification, and restore rehearsal.
+- Five-team authenticated load smoke against one active question.
+- Browser/runtime smoke for landing, admin login, question bank, student join, WebSocket,
+  buzzer, answer submission, judging, and leaderboard.
+- The checked-in `backend/scripts/e2e_smoke.py` reproduces the disposable end-to-end flow and
+  verifies WebSocket snapshots, idempotent judging replay, and leaderboard publication.
+- The checked-in `backend/scripts/quiz_soak_smoke.py` repeats the complete flow with bounded
+  concurrency and reports duration plus reconnect/score-publication invariants.
 
-### Build
-- `pnpm build` (production `next build`) must pass in CI before merge.
+## Release-only checks
 
-## Conventions
-
-- No real timers in tests — use Vitest fake timers for the 20s window.
-- In-memory repositories are constructed fresh per test (no shared global state).
-- Tests never depend on a database (there is none) or network access.
-- Socket tests bind to port `0` (ephemeral) to avoid clashes.
-
-## Known Non-Goals (this phase)
-
-- No browser E2E (Playwright/Cypress) yet.
-- No load testing; single-process in-memory design is not horizontally scalable.
+Before cutover, repeat the smoke and load tests against the production-like deployment with real
+event content, multiple API workers, shared rate-limit state, secret-manager injection, monitoring,
+and the documented rollback/restore procedure.

@@ -1,7 +1,9 @@
+import json
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,6 +14,7 @@ from app.db.models import ClassTrack, Question, QuestionClass, QuestionOption
 from app.db.session import get_db_session
 from app.schemas.question import (
     QuestionAdmin,
+    QuestionActivation,
     QuestionCreate,
     QuestionOptionAdmin,
     QuestionOptionPublic,
@@ -40,6 +43,7 @@ def to_admin(question: Question) -> QuestionAdmin:
     return QuestionAdmin(
         **public,
         explanation=question.explanation,
+        accepted_answers=json.loads(question.accepted_answers or "[]"),
         is_active=question.is_active,
         class_track_ids=[link.class_track_id for link in question.class_links],
         options=[QuestionOptionAdmin(key=o.option_key, text=o.option_text, is_correct=o.is_correct) for o in sorted(question.options, key=lambda item: item.sort_order)],
@@ -49,7 +53,7 @@ def to_admin(question: Question) -> QuestionAdmin:
 def question_query(include_inactive: bool = False):
     query = select(Question).options(selectinload(Question.options), selectinload(Question.class_links))
     if not include_inactive:
-        query = query.where(Question.is_active == True)
+        query = query.where(Question.is_active)
     return query.order_by(Question.created_at.desc())
 
 
@@ -79,9 +83,9 @@ async def list_admin_questions(session: AsyncSession = Depends(get_db_session), 
 
 @router.post("/admin/questions", response_model=QuestionAdmin, status_code=201)
 async def create_question(payload: QuestionCreate, session: AsyncSession = Depends(get_db_session), _: dict[str, object] = Depends(require_admin)) -> QuestionAdmin:
-    class_count = await session.scalar(select(ClassTrack.id).where(ClassTrack.id.in_(payload.class_track_ids)).limit(1))
-    if class_count is None:
-        raise AppError("INVALID_CLASS_TRACK", "At least one class track must exist.")
+    class_count = await session.scalar(select(func.count(ClassTrack.id)).where(ClassTrack.id.in_(payload.class_track_ids)))
+    if class_count != len(set(payload.class_track_ids)):
+        raise AppError("INVALID_CLASS_TRACK", "Every selected class track must exist.")
 
     question = Question(
         question_type=payload.question_type,
@@ -90,6 +94,7 @@ async def create_question(payload: QuestionCreate, session: AsyncSession = Depen
         prompt=payload.prompt,
         code_snippet=payload.code_snippet,
         explanation=payload.explanation,
+        accepted_answers=json.dumps(payload.accepted_answers, ensure_ascii=False),
         default_points=payload.default_points,
     )
     question.options = [QuestionOption(option_key=o.key, option_text=o.text, is_correct=o.is_correct, sort_order=index) for index, o in enumerate(payload.options)]
@@ -99,4 +104,88 @@ async def create_question(payload: QuestionCreate, session: AsyncSession = Depen
     add_audit(session, action_code="QUESTION_CREATED", entity_name="question", entity_id=question.id, details={"question_type": question.question_type})
     await session.commit()
     await session.refresh(question)
+    return to_admin(question)
+
+
+@router.put("/admin/questions/{question_id}", response_model=QuestionAdmin)
+async def update_question(
+    question_id: UUID,
+    payload: QuestionCreate,
+    session: AsyncSession = Depends(get_db_session),
+    admin: dict[str, object] = Depends(require_admin),
+) -> QuestionAdmin:
+    question = await session.scalar(
+        select(Question)
+        .options(selectinload(Question.options), selectinload(Question.class_links))
+        .where(Question.id == question_id)
+    )
+    if question is None:
+        raise AppError("QUESTION_NOT_FOUND", "The question was not found.", 404)
+
+    class_count = await session.scalar(select(func.count(ClassTrack.id)).where(ClassTrack.id.in_(payload.class_track_ids)))
+    if class_count != len(set(payload.class_track_ids)):
+        raise AppError("INVALID_CLASS_TRACK", "Every selected class track must exist.")
+
+    question.question_type = payload.question_type
+    question.difficulty = payload.difficulty
+    question.preferred_language = payload.preferred_language
+    question.prompt = payload.prompt
+    question.code_snippet = payload.code_snippet
+    question.explanation = payload.explanation
+    question.accepted_answers = json.dumps(payload.accepted_answers, ensure_ascii=False)
+    question.default_points = payload.default_points
+    question.updated_at = datetime.now(timezone.utc)
+    question.options = [
+        QuestionOption(option_key=option.key, option_text=option.text, is_correct=option.is_correct, sort_order=index)
+        for index, option in enumerate(payload.options)
+    ]
+    question.class_links = [QuestionClass(class_track_id=class_id) for class_id in payload.class_track_ids]
+    add_audit(
+        session,
+        action_code="QUESTION_UPDATED",
+        entity_name="question",
+        entity_id=question.id,
+        details={
+            "fields": [
+                "question_type", "difficulty", "preferred_language", "prompt", "code_snippet",
+                "explanation", "default_points", "class_track_ids", "options",
+            ],
+            "actor": admin.get("sub"),
+        },
+    )
+    await session.commit()
+    updated = await session.scalar(
+        select(Question)
+        .options(selectinload(Question.options), selectinload(Question.class_links))
+        .where(Question.id == question_id)
+    )
+    assert updated is not None
+    return to_admin(updated)
+
+
+@router.patch("/admin/questions/{question_id}/active", response_model=QuestionAdmin)
+async def set_question_active(
+    question_id: UUID,
+    payload: QuestionActivation,
+    session: AsyncSession = Depends(get_db_session),
+    admin: dict[str, object] = Depends(require_admin),
+) -> QuestionAdmin:
+    question = await session.scalar(
+        select(Question)
+        .options(selectinload(Question.options), selectinload(Question.class_links))
+        .where(Question.id == question_id)
+    )
+    if question is None:
+        raise AppError("QUESTION_NOT_FOUND", "The question was not found.", 404)
+    if question.is_active != payload.is_active:
+        question.is_active = payload.is_active
+        question.updated_at = datetime.now(timezone.utc)
+        add_audit(
+            session,
+            action_code="QUESTION_ACTIVATED" if question.is_active else "QUESTION_RETIRED",
+            entity_name="question",
+            entity_id=question.id,
+            details={"actor": admin.get("sub")},
+        )
+        await session.commit()
     return to_admin(question)

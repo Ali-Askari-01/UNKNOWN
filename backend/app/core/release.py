@@ -1,0 +1,1 @@
+EXPECTED_MIGRATION_HEAD = "0010_auto_quiz_rules"

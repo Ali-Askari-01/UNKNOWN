@@ -28,19 +28,20 @@ UNKNOWN is a live quiz competition website for a school event spanning three cla
 ## Technology
 
 - Next.js 16 (App Router) + React 19 + TypeScript (strict)
-- Custom Node server (`server.ts`) hosting Next.js and Socket.IO on one port
+- FastAPI + SQLAlchemy/Alembic API with native authenticated WebSocket realtime
+- SQL Server production persistence with SQLite isolated development fallback
 - Tailwind CSS 4, shadcn-style UI
 - pnpm package manager
 
-## Storage — Important Limitation (this phase)
+## Storage and authority
 
-**There is no database.** All state (teams, questions, quizzes, scores, buzzer state) lives in
-in-memory repositories inside the Node process.
+FastAPI and SQL Server are the authority for teams, questions, quiz sessions, participants,
+buzzer arbitration, answers, scores, and audit records. Next.js renders the UI and proxies
+versioned `/api/v1` requests to FastAPI.
 
-> **Temporary state resets on every server restart.** Quiz sessions, scores, and joined
-> teams do **not** survive restarts and are **not** production persistence. This phase
-> intentionally ships with a clean repository interface so a real database can be added
-> later without rewriting business logic.
+Quiz state survives API restarts through SQL Server. Production deployments require the documented
+Alembic migration, backup/restore, secret-manager, load/soak, and monitoring gates before event
+cutover.
 
-See `docs/ARCHITECTURE.md` for the repository pattern and `docs/SECURITY.md` for
-operational caveats.
+See `docs/ARCHITECTURE.md`, `docs/INTEGRATION_AUDIT.md`, and `docs/SECURITY.md` for the current
+runtime contract and operational caveats.

@@ -16,6 +16,7 @@ class QuestionCreate(BaseModel):
     prompt: str = Field(min_length=1)
     code_snippet: str | None = None
     explanation: str | None = None
+    accepted_answers: list[str] = Field(default_factory=list, max_length=20)
     default_points: int = Field(default=10, ge=1, le=100)
     class_track_ids: list[UUID] = Field(min_length=1)
     options: list[QuestionOptionInput] = Field(default_factory=list)
@@ -27,7 +28,14 @@ class QuestionCreate(BaseModel):
                 raise ValueError("MCQ questions require at least two options and exactly one correct option.")
         elif self.options:
             raise ValueError("Only MCQ questions may contain options.")
+        if self.question_type != "MCQ" and not any(answer.strip() for answer in self.accepted_answers):
+            raise ValueError("Non-MCQ questions require at least one accepted answer for automatic grading.")
+        self.accepted_answers = list(dict.fromkeys(answer.strip() for answer in self.accepted_answers if answer.strip()))
         return self
+
+
+class QuestionActivation(BaseModel):
+    is_active: bool
 
 
 class QuestionOptionPublic(BaseModel):
@@ -52,6 +60,7 @@ class QuestionOptionAdmin(QuestionOptionPublic):
 
 class QuestionAdmin(QuestionPublic):
     explanation: str | None
+    accepted_answers: list[str]
     is_active: bool
     class_track_ids: list[UUID]
     options: list[QuestionOptionAdmin]

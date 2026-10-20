@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class QuizSessionCreate(BaseModel):
@@ -19,10 +19,16 @@ class QuizSessionJoinResponse(QuizSessionResponse):
     class_code: str
 
 
+class QuizSessionActionResponse(QuizSessionResponse):
+    current_question_id: UUID | None = None
+    current_question_order: int | None = None
+
+
 class QuizSessionQuestionPublic(BaseModel):
     id: UUID
     question_order: int
     prompt: str
+    question_type: str
     code_snippet: str | None
     options: list[dict[str, str]]
 

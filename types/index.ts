@@ -53,6 +53,9 @@ export interface RoomSnapshot {
   questionNumber: number
   questionCount: number
   questionText: string | null
+  questionType: string | null
+  questionCodeSnippet: string | null
+  questionOptions: Array<{ key: string; text: string }>
   buzzerState: BuzzerState
   buzzerWinner: string | null
   answerDeadline: number | null

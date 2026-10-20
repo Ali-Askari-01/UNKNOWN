@@ -1,5 +1,7 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,7 +38,7 @@ def blueprint_query():
 
 @router.get("/quiz-blueprints", response_model=list[QuizBlueprintResponse])
 async def list_quiz_blueprints(session: AsyncSession = Depends(get_db_session)) -> list[QuizBlueprintResponse]:
-    blueprints = (await session.scalars(blueprint_query().where(QuizBlueprint.is_active == True))).unique().all()
+    blueprints = (await session.scalars(blueprint_query().where(QuizBlueprint.is_active))).unique().all()
     return [to_response(item) for item in blueprints]
 
 
@@ -69,6 +71,29 @@ async def create_quiz_blueprint(payload: QuizBlueprintCreate, session: AsyncSess
     session.add(blueprint)
     await session.flush()
     add_audit(session, action_code="BLUEPRINT_CREATED", entity_name="quiz_blueprint", entity_id=blueprint.id, details={"question_count": blueprint.question_count})
+    await session.commit()
+    created = await session.scalar(blueprint_query().where(QuizBlueprint.id == blueprint.id))
+    return to_response(created)
+@router.post("/admin/quiz-blueprints/standard", response_model=QuizBlueprintResponse)
+async def create_standard_quiz_blueprint(class_track_id: UUID, session: AsyncSession = Depends(get_db_session), _: dict[str, object] = Depends(require_admin)) -> QuizBlueprintResponse:
+    class_track = await session.scalar(select(ClassTrack).where(ClassTrack.id == class_track_id))
+    if class_track is None:
+        raise AppError("CLASS_TRACK_NOT_FOUND", "The selected class track was not found.", 404)
+    existing_round = await session.scalar(select(Round).where(Round.event_edition_id == class_track.event_edition_id, Round.name == "Standard 30-Question Quiz"))
+    if existing_round is None:
+        maximum = await session.scalar(select(func.max(Round.round_number)).where(Round.event_edition_id == class_track.event_edition_id))
+        existing_round = Round(event_edition_id=class_track.event_edition_id, round_number=int(maximum or 0) + 1, name="Standard 30-Question Quiz", round_type="QUIZ", status="DRAFT", description="10 conceptual, 5 riddles, 5 theory, and 10 code-debugging questions. Only riddles use the buzzer.")
+        session.add(existing_round)
+        await session.flush()
+    existing = await session.scalar(select(QuizBlueprint.id).where(QuizBlueprint.round_id == existing_round.id, QuizBlueprint.class_track_id == class_track.id))
+    if existing is not None:
+        saved = await session.scalar(blueprint_query().where(QuizBlueprint.id == existing))
+        return to_response(saved)
+    blueprint = QuizBlueprint(round_id=existing_round.id, class_track_id=class_track.id, name=f"Class {class_track.code} · Standard 30 Questions", question_count=30, seconds_per_question=30, buzzer_enabled=True)
+    blueprint.distributions = [QuizDistribution(question_type="CONCEPTUAL", quantity=10), QuizDistribution(question_type="RIDDLE", quantity=5), QuizDistribution(question_type="THEORY", quantity=5), QuizDistribution(question_type="DEBUGGING", quantity=10)]
+    session.add(blueprint)
+    await session.flush()
+    add_audit(session, action_code="STANDARD_BLUEPRINT_CREATED", entity_name="quiz_blueprint", entity_id=blueprint.id, details={"class_track_id": str(class_track.id), "question_count": 30})
     await session.commit()
     created = await session.scalar(blueprint_query().where(QuizBlueprint.id == blueprint.id))
     return to_response(created)

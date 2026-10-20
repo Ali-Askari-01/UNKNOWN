@@ -16,11 +16,13 @@ HTTPS ingress / reverse proxy
         │
 FastAPI container(s) ─── SQL Server
         │
-        ├── shared realtime broker when horizontally scaled
+        ├── SQL-backed realtime event relay when horizontally scaled
         └── object storage for media
 ```
 
-Start with one FastAPI worker for the live event unless shared websocket coordination is implemented. Scale only after proving event ordering, SQL transactions, and broadcast delivery across workers.
+Start with one FastAPI worker for the live event unless the SQL-backed realtime event relay has
+been migrated and verified. Scale only after proving event ordering, SQL transactions, and
+broadcast delivery across workers.
 
 ## CI gates
 

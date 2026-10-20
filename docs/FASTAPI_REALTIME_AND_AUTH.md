@@ -32,7 +32,9 @@ Required event families: session state, question opened, buzzer opened, buzzer a
 5. Create answer window and broadcast the authoritative state.
 6. Reject later presses without leaking the answer key.
 
-The in-process Python lock is only a local optimization. If more than one FastAPI worker is used, winner selection must rely on SQL Server transaction/constraint behavior and shared realtime delivery; never rely on process-local memory for correctness.
+The in-process Python lock is only a local optimization. If more than one FastAPI worker is used,
+winner selection must rely on SQL Server transaction/constraint behavior and the SQL-backed
+realtime event relay; never rely on process-local memory for correctness.
 
 ## Reconnect behavior
 

@@ -4,10 +4,33 @@ import { Suspense, useState, useEffect, type FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
+const DEFAULT_ADMIN_DESTINATION = '/admin/durable-quiz'
+const ALLOWED_ADMIN_DESTINATIONS = new Set([
+  '/admin/durable-quiz',
+  '/admin/questions',
+  '/admin/quiz',
+])
+
+function getSafeAdminDestination(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
+    return DEFAULT_ADMIN_DESTINATION
+  }
+
+  try {
+    const destination = new URL(value, 'https://admin.invalid')
+    if (destination.origin !== 'https://admin.invalid' || !ALLOWED_ADMIN_DESTINATIONS.has(destination.pathname)) {
+      return DEFAULT_ADMIN_DESTINATION
+    }
+    return `${destination.pathname}${destination.search}${destination.hash}`
+  } catch {
+    return DEFAULT_ADMIN_DESTINATION
+  }
+}
+
 function AdminLoginContent() {
   const router = useRouter()
   const params = useSearchParams()
-  const next = params.get('next') ?? '/admin/quiz'
+  const next = getSafeAdminDestination(params.get('next'))
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -16,7 +39,7 @@ function AdminLoginContent() {
 
   // Auto-redirect if already authenticated
   useEffect(() => {
-    fetch('/api/admin/login')
+    fetch('/api/v1/auth/me')
       .then((r) => r.json())
       .then((d) => { if (d.authenticated) router.replace(next) })
       .catch(() => {})
@@ -27,13 +50,14 @@ function AdminLoginContent() {
     setError('')
     setLoading(true)
     try {
-      const res = await fetch('/api/admin/login', {
+      const res = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? 'Login failed.'); return }
+      if (!res.ok) { setError(data.detail ?? data.error?.message ?? data.error ?? 'Login failed.'); return }
+
       router.replace(next)
     } catch {
       setError('Network error. Try again.')

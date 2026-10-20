@@ -1,118 +1,67 @@
-# Real-time Events
+# FastAPI Realtime Events
 
-> Status: Phase 2 catalog. "Existing" events work today in `server.ts`;
-> "planned" events land in Phases 6–7.
+The production quiz transport is the native FastAPI WebSocket endpoint:
 
-Transport: Socket.IO (websocket + polling fallback), same port as the app.
-Rooms: `room:{classId}` (ix|x|xi), `admin` (admin panel sockets).
+```text
+WebSocket /api/v1/ws/quiz/{session_id}
+```
 
-All payloads are validated with Zod on receipt. Clients may only emit intents —
-never authoritative values (no scores, no winner names, no deadlines).
+The browser sends `Sec-WebSocket-Protocol: auth.{signed-admin-or-team-token}`. The token is
+validated before the connection is accepted and is never placed in the URL. Team tokens are
+scoped to the target session. The browser receives sanitized state; answer keys and authoritative
+score fields are never exposed to students.
 
----
+## Server event envelope
 
-## Snapshot (`room:state`)
+Lifecycle broadcasts use the following shape:
 
-Emitted after every mutation to `room:{classId}` and to the requesting socket.
-
-```ts
-RoomSnapshot = {
-  classId: "ix" | "x" | "xi",
-  code: string | null,
-  status: "waiting" | "open" | "active" | "paused" | "ended",
-  questionNumber: number,          // 1-based; 0 before first question
-  questionText: string | null,     // planned (Phase 6)
-  buzzerState: "off" | "open" | "locked" | "expired",
-  buzzerWinner: string | null,     // team name
-  answerDeadline: number | null,   // epoch ms; clients render countdown only
-  scores: Array<{ groupName, score, buzzCount }>,
-  connectedCount: number
+```json
+{
+  "type": "quiz.state.changed",
+  "sessionId": "session-id",
+  "sequence": 42,
+  "serverTime": "2026-10-20T00:00:00Z",
+  "payload": {}
 }
 ```
 
----
+## Events
 
-## Student → Server (existing)
-
-| Event | Payload | Ack |
+| Event | Audience | Purpose |
 |---|---|---|
-| `room:join` | `{ classId, code, groupName }` | `{ ok, snapshot }` or `{ ok:false, error }` |
-| `buzzer:press` | `{}` | `{ ok, snapshot }` or `{ ok:false, error }` |
-| `room:getState` | `{}` | `{ ok, snapshot }` |
+| `quiz.state.snapshot` | Admin/team | Initial sanitized session state and currently open question |
+| `quiz.state.changed` | Admin/team | Persisted lifecycle or question transition |
+| `quiz.buzzer.accepted` | Admin/team | Database-confirmed winning buzzer and answer deadline |
+| `quiz.answer.submitted` | Admin/team | Pending answer entered for staff judging |
+| `quiz.answer.judged` | Admin/team | Staff decision and resulting score delta |
+| `quiz.snapshot.request.ack` | Requesting client | Acknowledges a snapshot refresh request |
+| `quiz.ping.ack` | Requesting client | Connection health acknowledgement |
 
-## Student → Server (planned)
+## Client messages
 
-| Event | Payload | Notes |
-|---|---|---|
-| `answer:submit` | `{ answer: string }` | Phase 7; only the buzzer winner's socket may emit. REST `POST /api/answer` remains the primary path. |
+Clients send intents only; the server remains authoritative for status, questions, winners,
+deadlines, answer eligibility, and scores.
 
-## Admin → Server (existing)
-
-Each requires `socket.data.isAdmin`; otherwise the ack is `{ ok:false, error:"forbidden" }`.
-
-| Event | Payload |
+| Message | Purpose |
 |---|---|
-| `admin:join` | `{}` — joins room `admin`, acks with all snapshots |
-| `admin:openRoom` | `{ classId }` |
-| `admin:resetRoom` | `{ classId }` |
-| `admin:setCode` | `{ classId, code }` |
-| `admin:startQuiz` | `{ classId }` |
-| `admin:endQuiz` | `{ classId }` |
-| `admin:activateBuzzer` | `{ classId }` |
-| `admin:disableBuzzer` | `{ classId }` |
-| `admin:reEnableBuzzer` | `{ classId }` |
-| `admin:markCorrect` | `{ classId, points }` |
-| `admin:markIncorrect` | `{ classId, deduct }` |
-| `admin:adjustScore` | `{ classId, groupName, delta }` |
-| `admin:nextQuestion` | `{ classId }` |
-| `admin:resetQuestion` | `{ classId }` |
-| `admin:getStates` | `{}` |
+| `quiz.snapshot.request` | Request a fresh state acknowledgement |
+| `quiz.ping` | Keepalive/health check |
 
-## Admin → Server (planned)
+Mutations use versioned REST endpoints:
 
-| Event | Payload | Notes |
-|---|---|---|
-| `admin:pauseQuiz` | `{ classId }` | Phase 6 — cancels timers, closes buzzer |
-| `admin:resumeQuiz` | `{ classId }` | Phase 6 |
-| `admin:reopenBuzzer` | `{ classId }` | Phase 6 — reopen after expiry/incorrect; excludes already-buzzed teams |
-| `admin:prepareQuiz` | `{ classId }` | Phase 6 — bind question bank, initialize room |
+- `POST /api/v1/quiz-sessions/{session_id}/questions/{question_id}/buzzer`
+- `POST /api/v1/quiz-sessions/{session_id}/answers`
+- `POST /api/v1/admin/quiz-sessions/{session_id}/actions/{action}`
+- `POST /api/v1/admin/quiz-sessions/{session_id}/answers/{answer_id}/judge`
 
-## Server → Clients (existing)
+The buzzer winner is selected by a database transaction and filtered unique constraint. Clients
+render server timestamps and deadlines; they never decide winners or scores locally.
 
-| Event | Audience | Payload |
-|---|---|---|
-| `room:state` | `room:{classId}` + acking socket | `RoomSnapshot` |
-| `buzzer:expired` | `room:{classId}` | `{ classId, questionNumber }` — fired by the 20s server timer |
-
-## Server → Clients (planned)
-
-| Event | Audience | Payload |
-|---|---|---|
-| `buzzer:winner` | `room:{classId}` | `{ classId, teamName, answerDeadline }` |
-| `buzzer:reopened` | `room:{classId}` | `{ classId, questionNumber }` |
-| `question:started` | `room:{classId}` | `{ classId, questionNumber }` |
-| `quiz:status` | `room:{classId}` + `admin` | `{ classId, status }` |
-| `answer:result` | `room:{classId}` | `{ classId, teamName, correct, pointsAwarded }` |
-| `leaderboard:update` | `room:{classId}` + `admin` | `{ classId, entries }` |
-
----
-
-## Atomic First-Winner Selection
-
-Node.js handles socket events serially on a single thread. For `buzzer:press`:
-
-1. Reject if `buzzerState !== "open"`.
-2. Reject if `buzzedThisQuestion.has(team)`.
-3. Commit: set winner, `buzzerState = "locked"`, add team to `buzzedThisQuestion`,
-   start the 20s timer — all synchronously before yielding.
-4. Any later press in the same tick or afterward fails step 1 or 2.
-
-No locks or queues are required; correctness comes from never awaiting between the
-check and the commit.
-
-## Timing Authority
-
-- Server: `setTimeout` per room for the answer window; cleared on pause/finish/reset.
-- Client: countdown UI computed from `answerDeadline - Date.now()`, display only.
-- On expiry the server emits `buzzer:expired` and updates the snapshot; clients never
-  transition state on their own clock alone.
+Snapshot and broadcast sequence numbers are allocated by the SQL-backed realtime event ledger. A
+database lock row is held until each ledger transaction commits, so concurrent workers cannot
+commit a higher identity before a lower identity and cause a relay cursor to skip an event. Each
+worker polls committed broadcast events and delivers them to its local WebSocket connections.
+Snapshots include every joined team,
+including zero-score teams, and reflect persisted score publication. The browser client reconnects
+with bounded exponential backoff up to 10 seconds; an intentional room leave cancels pending
+reconnects.

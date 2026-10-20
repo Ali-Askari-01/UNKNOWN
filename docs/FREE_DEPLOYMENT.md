@@ -1,14 +1,15 @@
 # Free deployment
 
-The free pilot topology keeps the existing SQL Server and Socket.IO architecture intact:
+The free pilot topology uses the standard Next.js frontend, FastAPI API, native WebSocket quiz
+transport, and SQL Server:
 
 ```text
 Render unknown-web  ->  Render unknown-api  ->  Azure SQL Database free offer
 ```
 
-Both Render services use the Free plan. The frontend remains a long-running Node service because
-the quiz currently uses Socket.IO. The backend image installs Microsoft's ODBC Driver 18 and runs
-Alembic migrations before starting FastAPI.
+Both Render services use the Free plan. The frontend remains a long-running Node service for the
+Next.js runtime. The backend image installs Microsoft's ODBC Driver 18; migrations are run by a
+separate controlled migration operation before the API is promoted.
 
 ## Required secrets
 
@@ -22,7 +23,6 @@ Set these values in Render; never commit them:
 - `BACKEND_CORS_ORIGINS`: the public URL of `unknown-web`
 - `BACKEND_TRUSTED_HOSTS`: Render hostnames and the custom domain, comma-separated
 - `BACKEND_ADMIN_USERNAME`
-- `BACKEND_ADMIN_PASSWORD`
 
 ## Known free-tier limitations
 

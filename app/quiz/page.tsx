@@ -1,16 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type FormEvent } from 'react'
 import Link from 'next/link'
-import { getSocket } from '@/lib/socket-client'
-import { groups } from '@/data/event'
+import { connectFastApiQuiz, type FastApiQuizEvent } from '@/lib/fastapi-realtime'
 import type { RoomSnapshot } from '@/types'
 
 type ClassId = 'ix' | 'x' | 'xi'
 type JoinStep = 'select-class' | 'enter-code' | 'select-group' | 'in-room'
 type BackendClass = { code: string; display_name: string; preferred_language: string }
 type BackendTeam = { id: string; name: string; slogan?: string | null }
-type BackendSession = { id: string; class_code: string; status: string }
+type BackendSession = { id: string; class_code: string; status: string; question_count?: number }
+type BackendTeamJoin = { id: string; access_token: string }
 
 const CLASS_META: Record<ClassId, { label: string; roman: string; language: string; tone: string }> = {
   ix:  { label: 'CLASS IX',  roman: 'IX',  language: 'PYTHON', tone: 'blue'  },
@@ -83,15 +83,21 @@ function QuizRoom({
   room,
   myGroup,
   onLeave,
+  onBuzz,
+  onAnswer,
 }: {
   room: RoomSnapshot
   myGroup: string
   onLeave: () => void
+  onBuzz: () => Promise<void>
+  onAnswer: (answer: string) => Promise<{ is_correct: boolean | null; awarded_points: number }>
 }) {
-  const socket = getSocket()
   const countdown = useCountdown(room.answerDeadline)
   const iWon = room.buzzerWinner === myGroup
   const [buzzerMsg, setBuzzerMsg] = useState('')
+  const [answerText, setAnswerText] = useState('')
+  const [answerSubmitted, setAnswerSubmitted] = useState(false)
+  const [answerFeedback, setAnswerFeedback] = useState('')
   const msgRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function flash(msg: string) {
@@ -100,10 +106,32 @@ function QuizRoom({
     msgRef.current = setTimeout(() => setBuzzerMsg(''), 3000)
   }
 
-  function handleBuzz() {
-    socket.emit('buzzer:press', (res: { ok: boolean; error?: string }) => {
-      if (!res.ok) flash(res.error ?? 'Could not buzz.')
-    })
+  async function handleBuzz() {
+    try {
+      await onBuzz()
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Could not buzz.')
+    }
+  }
+
+  useEffect(() => {
+    setAnswerText('')
+    setAnswerSubmitted(false)
+    setAnswerFeedback('')
+  }, [room.questionNumber])
+
+  async function handleAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!answerText.trim() || answerSubmitted) return
+    try {
+      const result = await onAnswer(answerText.trim())
+      setAnswerSubmitted(true)
+      const feedback = result.is_correct === null ? 'Submitted for manual review.' : result.is_correct ? `Correct — +${result.awarded_points} points.` : `Incorrect — ${result.awarded_points} points.`
+      setAnswerFeedback(feedback)
+      flash(feedback)
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Could not submit answer.')
+    }
   }
 
   const meta = CLASS_META[room.classId]
@@ -111,7 +139,9 @@ function QuizRoom({
   const statusMessages: Record<string, string> = {
     waiting: 'Waiting for admin to open the room.',
     open: 'Room is open. Quiz starting soon.',
-    active: room.buzzerState === 'off'
+    active: room.questionType !== 'RIDDLE'
+      ? `Question #${room.questionNumber} — answer now.`
+      : room.buzzerState === 'off'
       ? `Question #${room.questionNumber} — Waiting for buzzer.`
       : room.buzzerState === 'open'
       ? 'BUZZER IS ACTIVE — press now!'
@@ -144,15 +174,23 @@ function QuizRoom({
           )}
         </div>
 
+        {room.status === 'active' && room.questionText && (
+          <section className="sp-question-card" aria-live="polite">
+            <p className="sp-step-label">QUESTION {room.questionNumber}</p>
+            <h1>{room.questionText}</h1>
+            {room.questionCodeSnippet && <pre className="sp-question-code"><code>{room.questionCodeSnippet}</code></pre>}
+          </section>
+        )}
+
         {/* Buzzer area */}
-        {room.status === 'active' && (
+        {room.status === 'active' && room.questionType === 'RIDDLE' && (
           <div className="sp-buzzer-area">
             <BuzzerButton
               buzzerState={room.buzzerState}
               buzzerWinner={room.buzzerWinner}
               myGroup={myGroup}
               onPress={handleBuzz}
-              disabled={room.buzzerState !== 'open'}
+              disabled={room.buzzerState !== 'open' || answerSubmitted}
             />
 
             {/* Winner + countdown */}
@@ -167,7 +205,17 @@ function QuizRoom({
                         <span className="sp-countdown-label">SECONDS TO ANSWER</span>
                       </div>
                     )}
-                    {countdown === 0 && !room.answerDeadline && (
+                    {!answerSubmitted && countdown > 0 && (
+                      <form onSubmit={handleAnswer} style={{ marginTop: 16 }}>
+                        <label htmlFor="quiz-answer" className="sp-winner-label">YOUR ANSWER</label>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          <input id="quiz-answer" value={answerText} onChange={(event) => setAnswerText(event.target.value)} autoComplete="off" />
+                          <button type="submit" className="sp-join-btn">SUBMIT</button>
+                        </div>
+                      </form>
+                    )}
+                    {answerSubmitted && <p className="sp-winner-label">{answerFeedback}</p>}
+                    {room.answerDeadline && countdown === 0 && !answerSubmitted && (
                       <p className="sp-expired-label">TIME EXPIRED</p>
                     )}
                   </>
@@ -187,6 +235,18 @@ function QuizRoom({
             )}
 
             {buzzerMsg && <p className="sp-buzzer-msg" role="alert">{buzzerMsg}</p>}
+          </div>
+        )}
+
+        {room.status === 'active' && room.questionType !== 'RIDDLE' && (
+          <div className="sp-buzzer-area">
+            {room.answerDeadline && <p className="sp-winner-label">{countdown} SECONDS REMAINING</p>}
+            {!answerSubmitted ? <form onSubmit={handleAnswer} style={{ marginTop: 12 }}>
+              {room.questionType === 'MCQ' && room.questionOptions.length > 0 ? <select id="quiz-answer" value={answerText} onChange={(event) => setAnswerText(event.target.value)} required aria-label="Choose your answer">
+                <option value="">SELECT AN ANSWER</option>{room.questionOptions.map((option) => <option key={option.key} value={option.key}>{option.key}. {option.text}</option>)}
+              </select> : <input id="quiz-answer" value={answerText} onChange={(event) => setAnswerText(event.target.value)} autoComplete="off" required aria-label="Your answer" />}
+              <button type="submit" className="sp-join-btn" disabled={Boolean(room.answerDeadline && countdown === 0)}>SUBMIT ANSWER</button>
+            </form> : <p className="sp-winner-label">{answerFeedback}</p>}
           </div>
         )}
 
@@ -232,70 +292,131 @@ export default function StudentQuizPage() {
   const [joining, setJoining] = useState(false)
   const [room, setRoom] = useState<RoomSnapshot | null>(null)
   const [myGroup, setMyGroup] = useState('')
-  const [connected, setConnected] = useState(false)
   const [backendClasses, setBackendClasses] = useState<BackendClass[]>([])
   const [backendGroups, setBackendGroups] = useState<BackendTeam[]>([])
+  const [backendSessionId, setBackendSessionId] = useState<string | null>(null)
+  const [backendTeamToken, setBackendTeamToken] = useState<string | null>(null)
+  const [backendParticipantId, setBackendParticipantId] = useState<string | null>(null)
+  const [backendQuestionId, setBackendQuestionId] = useState<string | null>(null)
+  const [fastApiConnected, setFastApiConnected] = useState(false)
+  const [configurationLoading, setConfigurationLoading] = useState(true)
+  const [configurationError, setConfigurationError] = useState('')
+  const [teamsLoading, setTeamsLoading] = useState(false)
+  const [teamsError, setTeamsError] = useState('')
 
   useEffect(() => {
     let cancelled = false
+    setConfigurationLoading(true)
+    setConfigurationError('')
     fetch('/api/v1/classes')
-      .then((response) => response.ok ? response.json() as Promise<BackendClass[]> : [])
-      .then((items) => { if (!cancelled) setBackendClasses(items) })
-      .catch(() => undefined)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('The event configuration could not be loaded.')
+        return response.json() as Promise<BackendClass[]>
+      })
+      .then((items) => {
+        if (cancelled) return
+        if (items.length === 0) throw new Error('No quiz classes are configured for this event.')
+        setBackendClasses(items)
+        setConfigurationLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBackendClasses([])
+        setConfigurationLoading(false)
+        setConfigurationError('The quiz service is unavailable. Please refresh and try again.')
+      })
     return () => { cancelled = true }
   }, [])
 
-  const availableClasses = (backendClasses.length ? backendClasses.map((item) => item.code.toLowerCase()) : ['ix', 'x', 'xi']) as ClassId[]
+  const availableClasses = backendClasses
+    .map((item) => item.code.toLowerCase())
+    .filter((code): code is ClassId => code === 'ix' || code === 'x' || code === 'xi')
+  const isConnected = fastApiConnected
 
   useEffect(() => {
-    if (!selectedClass) { setBackendGroups([]); return }
+    if (!selectedClass) {
+      setBackendGroups([])
+      setTeamsLoading(false)
+      setTeamsError('')
+      return
+    }
     let cancelled = false
+    setTeamsLoading(true)
+    setTeamsError('')
     fetch(`/api/v1/teams?class_code=${selectedClass.toUpperCase()}`)
-      .then((response) => response.ok ? response.json() as Promise<BackendTeam[]> : [])
-      .then((items) => { if (!cancelled) setBackendGroups(items) })
-      .catch(() => { if (!cancelled) setBackendGroups([]) })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('The teams could not be loaded.')
+        return response.json() as Promise<BackendTeam[]>
+      })
+      .then((items) => {
+        if (cancelled) return
+        setBackendGroups(items)
+        setTeamsLoading(false)
+        if (items.length === 0) setTeamsError('No teams are configured for this class.')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBackendGroups([])
+        setTeamsLoading(false)
+        setTeamsError('The teams could not be loaded. Please try again.')
+      })
     return () => { cancelled = true }
   }, [selectedClass])
 
   const classGroups = selectedClass
-    ? (backendGroups.length ? backendGroups.map((team) => team.name) : groups.filter((g) => g.classId === selectedClass).map((g) => g.name))
+    ? backendGroups.map((team) => team.name)
     : []
 
-  // Socket reconnection: re-join room on reconnect
   useEffect(() => {
-    const socket = getSocket()
-
-    function onConnect() {
-      setConnected(true)
-      // If we were already in a room, re-join transparently
-      if (myGroup && selectedClass && roomCode) {
-        socket.emit(
-          'room:join',
-          { classId: selectedClass, code: roomCode, groupName: myGroup },
-          (res: { ok: boolean; state?: RoomSnapshot }) => {
-            if (res.ok && res.state) setRoom(res.state)
-          }
-        )
+    if (step !== 'in-room' || !backendSessionId || !backendTeamToken || !selectedClass) return
+    const socket = connectFastApiQuiz(backendSessionId, backendTeamToken, (event: FastApiQuizEvent) => {
+      const payload = event.payload ?? {}
+      if (event.type === 'quiz.state.snapshot' || event.type === 'quiz.state.changed') {
+        const status = (payload.status ?? 'WAITING').toLowerCase() as RoomSnapshot['status']
+        const currentQuestionId = payload.currentQuestionId ?? null
+        setBackendQuestionId(currentQuestionId)
+        setRoom((previous) => ({
+          classId: selectedClass,
+          code: roomCode.trim().toUpperCase(),
+          status,
+          questionNumber: payload.currentQuestionOrder ?? previous?.questionNumber ?? 0,
+          questionCount: payload.questionCount ?? previous?.questionCount ?? 0,
+          questionText: payload.question?.prompt ?? previous?.questionText ?? null,
+          questionType: payload.question?.questionType ?? previous?.questionType ?? null,
+          questionOptions: payload.question?.options ?? previous?.questionOptions ?? [],
+          questionCodeSnippet: payload.question?.codeSnippet ?? previous?.questionCodeSnippet ?? null,
+          buzzerState: (payload.buzzerState ?? (status === 'active' ? 'open' : 'off')) as RoomSnapshot['buzzerState'],
+          buzzerWinner: payload.buzzerWinner ?? null,
+          answerDeadline: payload.answerDeadline ? Date.parse(payload.answerDeadline) : null,
+          scores: payload.scores?.map((score) => ({ ...score, buzzCount: 0 })) ?? previous?.scores ?? [],
+          connectedCount: previous?.connectedCount ?? 0,
+        }))
+      } else if (event.type === 'quiz.buzzer.accepted') {
+        setRoom((previous) => previous ? {
+          ...previous,
+          buzzerState: 'locked',
+          buzzerWinner: payload.teamName ?? (payload.participantId === undefined ? 'ANOTHER TEAM' : myGroup),
+          answerDeadline: payload.answerDeadline ? Date.parse(payload.answerDeadline) : null,
+        } : previous)
+      } else if (event.type === 'quiz.answer.submitted' && payload.buzzerOpen) {
+        setRoom((previous) => previous ? { ...previous, buzzerState: 'open', buzzerWinner: null, answerDeadline: null } : previous)
+      } else if (event.type === 'quiz.answer.submitted' && payload.questionClosed) {
+        setRoom((previous) => previous ? { ...previous, buzzerState: 'off', buzzerWinner: null, answerDeadline: null } : previous)
+      } else if (event.type === 'quiz.answer.judged') {
+        void fetch(`/api/v1/quiz-sessions/${backendSessionId}/leaderboard`, { cache: 'no-store' })
+          .then((response) => response.ok ? response.json() as Promise<Array<{ team_name: string; points: number }>> : [])
+          .then((entries) => setRoom((previous) => previous ? {
+            ...previous,
+            scores: entries.map((entry) => ({ groupName: entry.team_name, score: entry.points, buzzCount: 0 })),
+          } : previous))
+          .catch(() => undefined)
       }
-    }
-
-    function onDisconnect() { setConnected(false) }
-
-    function onRoomState(snap: RoomSnapshot) {
-      if (snap.classId === selectedClass) setRoom(snap)
-    }
-
-    socket.on('connect', onConnect)
-    socket.on('disconnect', onDisconnect)
-    socket.on('room:state', onRoomState)
-    if (socket.connected) setConnected(true)
-
+    }, (state) => setFastApiConnected(state === 'connected'))
     return () => {
-      socket.off('connect', onConnect)
-      socket.off('disconnect', onDisconnect)
-      socket.off('room:state', onRoomState)
+      socket.close()
+      setFastApiConnected(false)
     }
-  }, [selectedClass, roomCode, myGroup])
+  }, [backendSessionId, backendTeamToken, myGroup, roomCode, selectedClass, step])
 
   const handleJoin = useCallback(async () => {
     if (!selectedClass || !roomCode || !selectedGroup) return
@@ -305,46 +426,92 @@ export default function StudentQuizPage() {
     const selectedBackendTeam = backendGroups.find((team) => team.name === selectedGroup)
     try {
       const sessionResponse = await fetch(`/api/v1/quiz-sessions/by-code/${encodeURIComponent(normalizedCode)}`)
-      if (sessionResponse.ok) {
-        const backendSession = await sessionResponse.json() as BackendSession
-        if (backendSession.class_code.toLowerCase() !== selectedClass) {
-          setJoining(false)
-          setJoinError(`This room is configured for Class ${backendSession.class_code}.`)
-          return
-        }
-        if (!selectedBackendTeam) {
-          setJoining(false)
-          setJoinError('This team is not available in the database-backed event edition.')
-          return
-        }
-        const participantResponse = await fetch(`/api/v1/quiz-sessions/${backendSession.id}/participants`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ team_id: selectedBackendTeam.id }),
-        })
-        if (!participantResponse.ok) {
-          const errorBody = await participantResponse.json().catch(() => ({})) as { detail?: string }
-          setJoining(false)
-          setJoinError(errorBody.detail ?? 'Could not register the team for this quiz.')
-          return
-        }
+      if (!sessionResponse.ok) {
+        const errorBody = await sessionResponse.json().catch(() => ({})) as { detail?: string; error?: { message?: string } }
+        throw new Error(errorBody.detail ?? errorBody.error?.message ?? 'That quiz room could not be found.')
       }
-    } catch {
-      // The legacy Socket.IO room remains available when FastAPI is offline.
+      const backendSession = await sessionResponse.json() as BackendSession
+      if (backendSession.class_code.toLowerCase() !== selectedClass) {
+        throw new Error(`This room is configured for Class ${backendSession.class_code}.`)
+      }
+      if (!selectedBackendTeam) {
+        throw new Error('This team is not available in the database-backed event edition.')
+      }
+      const participantResponse = await fetch('/api/v1/auth/team/join', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `team-join-${normalizedCode}-${selectedBackendTeam.id}`,
+        },
+        body: JSON.stringify({ quiz_code: normalizedCode, team_id: selectedBackendTeam.id }),
+      })
+      if (!participantResponse.ok) {
+        const errorBody = await participantResponse.json().catch(() => ({})) as { detail?: string; error?: { message?: string } }
+        throw new Error(errorBody.detail ?? errorBody.error?.message ?? 'Could not register the team for this quiz.')
+      }
+      const joinData = await participantResponse.json() as BackendTeamJoin
+      setBackendSessionId(backendSession.id)
+      setBackendTeamToken(joinData.access_token)
+      setBackendParticipantId(joinData.id)
+      setBackendQuestionId(null)
+      setMyGroup(selectedGroup)
+      setRoom({
+        classId: selectedClass,
+        code: normalizedCode,
+        status: backendSession.status.toLowerCase() as RoomSnapshot['status'],
+        questionNumber: 0,
+        questionCount: backendSession.question_count ?? 0,
+        questionText: null,
+        questionType: null,
+        questionOptions: [],
+        questionCodeSnippet: null,
+        buzzerState: 'off',
+        buzzerWinner: null,
+        answerDeadline: null,
+        scores: [],
+        connectedCount: 0,
+      })
+      setJoining(false)
+      setStep('in-room')
+    } catch (cause) {
+      setJoining(false)
+      setJoinError(cause instanceof Error ? cause.message : 'The durable quiz service is unavailable. Please try again shortly.')
     }
-    const socket = getSocket()
-    socket.emit(
-      'room:join',
-      { classId: selectedClass, code: normalizedCode, groupName: selectedGroup },
-      (res: { ok: boolean; error?: string; state?: RoomSnapshot }) => {
-        setJoining(false)
-        if (!res.ok) { setJoinError(res.error ?? 'Could not join.'); return }
-        setMyGroup(selectedGroup)
-        setRoom(res.state!)
-        setStep('in-room')
-      }
-    )
-  }, [selectedClass, roomCode, selectedGroup])
+  }, [backendGroups, selectedClass, roomCode, selectedGroup])
+
+  const handleFastApiBuzz = useCallback(async () => {
+    if (!backendSessionId || !backendTeamToken || !backendQuestionId) {
+      throw new Error('Waiting for the active question.')
+    }
+    const response = await fetch(`/api/v1/quiz-sessions/${backendSessionId}/questions/${backendQuestionId}/buzzer`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${backendTeamToken}` },
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { detail?: string; error?: { message?: string } }
+      throw new Error(body.detail ?? body.error?.message ?? 'Could not buzz.')
+    }
+  }, [backendQuestionId, backendSessionId, backendTeamToken])
+
+  const handleFastApiAnswer = useCallback(async (answer: string): Promise<{ is_correct: boolean | null; awarded_points: number }> => {
+    if (!backendSessionId || !backendTeamToken || !backendQuestionId || !backendParticipantId) {
+      throw new Error('Waiting for the active question.')
+    }
+    const response = await fetch(`/api/v1/quiz-sessions/${backendSessionId}/answers`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${backendTeamToken}`,
+        'Idempotency-Key': `answer-${backendSessionId}-${backendQuestionId}-${backendParticipantId}`,
+      },
+      body: JSON.stringify({ participant_id: backendParticipantId, quiz_question_id: backendQuestionId, submitted_answer: answer }),
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { detail?: string; error?: { message?: string } }
+      throw new Error(body.detail ?? body.error?.message ?? 'Could not submit answer.')
+    }
+    return await response.json() as { is_correct: boolean | null; awarded_points: number }
+  }, [backendParticipantId, backendQuestionId, backendSessionId, backendTeamToken])
 
   function handleLeave() {
     setStep('select-class')
@@ -353,12 +520,17 @@ export default function StudentQuizPage() {
     setSelectedGroup('')
     setRoom(null)
     setMyGroup('')
+    setBackendSessionId(null)
+    setBackendTeamToken(null)
+    setBackendParticipantId(null)
+    setBackendQuestionId(null)
+    setFastApiConnected(false)
     setJoinError('')
   }
 
   // ── In room ────────────────────────────────────────────────────────────────
   if (step === 'in-room' && room) {
-    return <QuizRoom room={room} myGroup={myGroup} onLeave={handleLeave} />
+    return <QuizRoom room={room} myGroup={myGroup} onLeave={handleLeave} onBuzz={handleFastApiBuzz} onAnswer={handleFastApiAnswer} />
   }
 
   // ── Join flow ──────────────────────────────────────────────────────────────
@@ -367,12 +539,14 @@ export default function StudentQuizPage() {
       <header className="sp-join-header">
         <Link href="/" className="sp-wordmark"><span className="mark">[ ]</span> TECH EVENT</Link>
         <span className="sp-join-title">JOIN QUIZ</span>
-        <span className={`sp-conn-dot ${connected ? 'conn-ok' : 'conn-off'}`} title={connected ? 'Connected' : 'Connecting…'} />
+        <span className={`sp-conn-dot ${isConnected ? 'conn-ok' : 'conn-off'}`} title={isConnected ? 'Connected' : 'Connecting…'} />
       </header>
 
       <div className="sp-join-card">
+        {configurationLoading && <p className="sp-conn-warn">Loading event configuration…</p>}
+        {configurationError && <p className="sp-join-error" role="alert">{configurationError}</p>}
         {/* Step 1: Select class */}
-        <div className="sp-step">
+        {!configurationLoading && !configurationError && <div className="sp-step">
           <p className="sp-step-label">STEP 1 — SELECT YOUR CLASS</p>
           <div className="sp-class-grid">
             {availableClasses.map((cid) => {
@@ -392,10 +566,10 @@ export default function StudentQuizPage() {
               )
             })}
           </div>
-        </div>
+        </div>}
 
         {/* Step 2: Room code */}
-        {selectedClass && (
+        {!configurationLoading && !configurationError && selectedClass && (
           <div className="sp-step">
             <p className="sp-step-label">STEP 2 — ENTER ROOM CODE</p>
             <div className="sp-code-row">
@@ -414,10 +588,12 @@ export default function StudentQuizPage() {
         )}
 
         {/* Step 3: Select group */}
-        {selectedClass && roomCode.length >= 2 && (
+        {!configurationLoading && !configurationError && selectedClass && roomCode.length >= 2 && (
           <div className="sp-step">
             <p className="sp-step-label">STEP 3 — SELECT YOUR GROUP</p>
-            <div className="sp-group-grid">
+            {teamsLoading && <p className="sp-conn-warn">Loading teams…</p>}
+            {teamsError && <p className="sp-join-error" role="alert">{teamsError}</p>}
+            {!teamsLoading && !teamsError && <div className="sp-group-grid">
               {classGroups.map((name) => (
                 <button
                   key={name}
@@ -428,7 +604,7 @@ export default function StudentQuizPage() {
                   {name}
                 </button>
               ))}
-            </div>
+            </div>}
           </div>
         )}
 
@@ -436,20 +612,18 @@ export default function StudentQuizPage() {
         {joinError && <p className="sp-join-error" role="alert">{joinError}</p>}
 
         {/* Join button */}
-        {selectedClass && roomCode && selectedGroup && (
+        {!configurationLoading && !configurationError && selectedClass && roomCode && selectedGroup && (
           <button
             type="button"
             className="sp-join-btn"
             onClick={handleJoin}
-            disabled={joining || !connected}
+            disabled={joining}
           >
             {joining ? 'JOINING…' : `JOIN ROOM →`}
           </button>
         )}
 
-        {!connected && (
-          <p className="sp-conn-warn">Connecting to server… please wait.</p>
-        )}
+        {step === 'in-room' && !isConnected && <p className="sp-conn-warn">Connecting to server… please wait.</p>}
       </div>
 
       <p className="sp-join-foot">
