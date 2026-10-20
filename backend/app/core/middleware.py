@@ -1,3 +1,4 @@
+from typing import ClassVar
 from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -33,7 +34,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class CookieOriginMiddleware(BaseHTTPMiddleware):
     """Reject cross-origin state changes when browser cookies are attached."""
 
-    unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
+    unsafe_methods: ClassVar[set[str]] = {"POST", "PUT", "PATCH", "DELETE"}
 
     async def dispatch(self, request: Request, call_next) -> Response:
         origin = request.headers.get("origin")

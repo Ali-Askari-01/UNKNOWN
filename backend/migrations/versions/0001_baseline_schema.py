@@ -3,8 +3,8 @@
 Revision ID: 0001_baseline_schema
 Revises:
 """
-from pathlib import Path
 import re
+from pathlib import Path
 
 from alembic import op
 

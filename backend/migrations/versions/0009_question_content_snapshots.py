@@ -1,8 +1,7 @@
 """Preserve complete question content in generated quiz sessions."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0009_question_content_snapshots"
 down_revision = "0008_realtime_event_ordering"

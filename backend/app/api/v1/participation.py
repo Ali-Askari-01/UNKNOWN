@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -6,16 +6,34 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError
-from app.core.auth import require_admin, require_team
 from app.core.audit import add_audit
+from app.core.auth import require_admin, require_team
+from app.core.errors import AppError
 from app.core.grading import grade_answer
 from app.core.idempotency import request_hash, reserve
 from app.core.rate_limit import enforce_rate_limit
-from app.db.models import AnswerSubmission, BuzzerPress, QuizBlueprint, QuizParticipant, QuizQuestion, QuizSession, ScoreEntry, Team
+from app.db.models import (
+    AnswerSubmission,
+    BuzzerPress,
+    QuizBlueprint,
+    QuizParticipant,
+    QuizQuestion,
+    QuizSession,
+    ScoreEntry,
+    Team,
+)
 from app.db.session import get_db_session
 from app.realtime.manager import connection_manager
-from app.schemas.participation import AdminAnswerResponse, AnswerCreate, AnswerResponse, BuzzerResponse, JudgeAnswerRequest, LeaderboardEntry, ParticipantCreate, ParticipantResponse
+from app.schemas.participation import (
+    AdminAnswerResponse,
+    AnswerCreate,
+    AnswerResponse,
+    BuzzerResponse,
+    JudgeAnswerRequest,
+    LeaderboardEntry,
+    ParticipantCreate,
+    ParticipantResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["participation"])
 
@@ -56,8 +74,8 @@ async def press_buzzer(
     if existing_winner is not None:
         winner_pressed_at = existing_winner.pressed_at
         if winner_pressed_at.tzinfo is None:
-            winner_pressed_at = winner_pressed_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) <= winner_pressed_at + timedelta(seconds=blueprint.seconds_per_question):
+            winner_pressed_at = winner_pressed_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) <= winner_pressed_at + timedelta(seconds=blueprint.seconds_per_question):
             raise AppError("BUZZER_ALREADY_WON", "Another team has already won this question.", 409)
         existing_winner.is_winner = False
         await session.flush()
@@ -65,7 +83,7 @@ async def press_buzzer(
     if prior_answer is not None:
         raise AppError("ANSWER_ALREADY_SUBMITTED", "Your team has already answered this riddle.", 409)
 
-    pressed_at = datetime.now(timezone.utc)
+    pressed_at = datetime.now(UTC)
     press = BuzzerPress(quiz_question_id=question_id, participant_id=participant.id, pressed_at=pressed_at, is_winner=True)
     session.add(press)
     try:
@@ -125,8 +143,8 @@ async def submit_answer(session_id: UUID, payload: AnswerCreate, request: Reques
         raise AppError("ANSWER_NOT_OPEN", "This question is not accepting answers.", 409)
     pressed_at = winning_press.pressed_at if winning_press is not None else quiz_question.opened_at
     if pressed_at.tzinfo is None:
-        pressed_at = pressed_at.replace(tzinfo=timezone.utc)
-    if datetime.now(timezone.utc) > pressed_at + timedelta(seconds=blueprint.seconds_per_question):
+        pressed_at = pressed_at.replace(tzinfo=UTC)
+    if datetime.now(UTC) > pressed_at + timedelta(seconds=blueprint.seconds_per_question):
         raise AppError("ANSWER_WINDOW_EXPIRED", "The answer window has expired.", 409)
     idempotency_record = await reserve(
         session,
@@ -153,7 +171,7 @@ async def submit_answer(session_id: UUID, payload: AnswerCreate, request: Reques
         is_final=True,
         is_correct=is_correct,
         awarded_points=awarded_points,
-        judged_at=datetime.now(timezone.utc) if is_correct is not None else None,
+        judged_at=datetime.now(UTC) if is_correct is not None else None,
     )
     session.add(answer)
     try:
@@ -163,7 +181,7 @@ async def submit_answer(session_id: UUID, payload: AnswerCreate, request: Reques
             round_id = await session.scalar(select(QuizBlueprint.round_id).where(QuizBlueprint.id == blueprint.id))
             session.add(ScoreEntry(team_id=participant.team_id, round_id=round_id, quiz_session_id=session_id, answer_submission_id=answer.id, points_delta=awarded_points, reason="ANSWER"))
             if is_riddle and is_correct:
-                quiz_question.closed_at = datetime.now(timezone.utc)
+                quiz_question.closed_at = datetime.now(UTC)
             elif is_riddle and winning_press is not None:
                 winning_press.is_winner = False
         add_audit(session, action_code="ANSWER_SUBMITTED", entity_name="answer_submission", entity_id=answer.id, details={"correct": is_correct, "points": awarded_points})
@@ -210,7 +228,7 @@ async def judge_answer(
     points = payload.awarded_points if payload.awarded_points is not None else (quiz_question.points_snapshot if payload.is_correct else 0)
     answer.is_correct = payload.is_correct
     answer.awarded_points = points
-    answer.judged_at = datetime.now(timezone.utc)
+    answer.judged_at = datetime.now(UTC)
     round_id = await session.scalar(select(QuizBlueprint.round_id).where(QuizBlueprint.id == blueprint.id))
     session.add(ScoreEntry(team_id=participant.team_id, round_id=round_id, quiz_session_id=session_id, answer_submission_id=answer.id, points_delta=points, reason="ANSWER"))
     add_audit(session, action_code="ANSWER_JUDGED", entity_name="answer_submission", entity_id=answer.id, details={"correct": payload.is_correct, "points": points})

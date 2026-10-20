@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import app.api.v1.health as health
-import app.core.middleware as middleware
+from app.api.v1 import health
+from app.core import middleware
 from app.main import app
 
 

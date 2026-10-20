@@ -1,12 +1,20 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import func, select
 
 from app.core.auth import verify_admin_token, verify_team_token
-from app.db.models import BuzzerPress, QuizBlueprint, QuizParticipant, QuizQuestion, QuizSession, ScoreEntry, Team
+from app.db.models import (
+    BuzzerPress,
+    QuizBlueprint,
+    QuizParticipant,
+    QuizQuestion,
+    QuizSession,
+    ScoreEntry,
+    Team,
+)
 from app.db.session import SessionFactory
 from app.realtime.manager import connection_manager
 
@@ -79,23 +87,23 @@ async def quiz_realtime(websocket: WebSocket, session_id: UUID) -> None:
                 opened_at = current.opened_at
                 if opened_at is not None:
                     if opened_at.tzinfo is None:
-                        opened_at = opened_at.replace(tzinfo=timezone.utc)
+                        opened_at = opened_at.replace(tzinfo=UTC)
                     answer_deadline = (opened_at + timedelta(seconds=blueprint.seconds_per_question)).isoformat()
             elif winning_press is None:
                 buzzer_state = "open" if blueprint.buzzer_enabled else "off"
             else:
                 pressed_at = winning_press.pressed_at
                 if pressed_at.tzinfo is None:
-                    pressed_at = pressed_at.replace(tzinfo=timezone.utc)
+                    pressed_at = pressed_at.replace(tzinfo=UTC)
                 answer_deadline = (pressed_at + timedelta(seconds=blueprint.seconds_per_question)).isoformat()
-                buzzer_state = "locked" if datetime.now(timezone.utc) < pressed_at + timedelta(seconds=blueprint.seconds_per_question) else "expired"
+                buzzer_state = "locked" if datetime.now(UTC) < pressed_at + timedelta(seconds=blueprint.seconds_per_question) else "expired"
         await websocket.send_json(
             {
                 "eventId": f"snapshot-{session_id}-{snapshot_sequence}",
                 "type": "quiz.state.snapshot",
                 "sessionId": str(session_id),
                 "sequence": snapshot_sequence,
-                "serverTime": datetime.now(timezone.utc).isoformat(),
+                "serverTime": datetime.now(UTC).isoformat(),
                 "payload": {
                     "status": quiz_session.status,
                     "questionCount": len(questions),

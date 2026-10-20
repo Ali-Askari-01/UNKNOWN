@@ -7,8 +7,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import ADMIN_COOKIE_NAME, TEAM_COOKIE_NAME, issue_admin_token, issue_team_token, verify_admin_token
 from app.core.audit import add_audit
+from app.core.auth import (
+    ADMIN_COOKIE_NAME,
+    TEAM_COOKIE_NAME,
+    issue_admin_token,
+    issue_team_token,
+    verify_admin_token,
+)
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.idempotency import request_hash, reserve

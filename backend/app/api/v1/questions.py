@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -7,14 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.errors import AppError
-from app.core.auth import require_admin
 from app.core.audit import add_audit
+from app.core.auth import require_admin
+from app.core.errors import AppError
 from app.db.models import ClassTrack, Question, QuestionClass, QuestionOption
 from app.db.session import get_db_session
 from app.schemas.question import (
-    QuestionAdmin,
     QuestionActivation,
+    QuestionAdmin,
     QuestionCreate,
     QuestionOptionAdmin,
     QuestionOptionPublic,
@@ -134,7 +134,7 @@ async def update_question(
     question.explanation = payload.explanation
     question.accepted_answers = json.dumps(payload.accepted_answers, ensure_ascii=False)
     question.default_points = payload.default_points
-    question.updated_at = datetime.now(timezone.utc)
+    question.updated_at = datetime.now(UTC)
     question.options = [
         QuestionOption(option_key=option.key, option_text=option.text, is_correct=option.is_correct, sort_order=index)
         for index, option in enumerate(payload.options)
@@ -179,7 +179,7 @@ async def set_question_active(
         raise AppError("QUESTION_NOT_FOUND", "The question was not found.", 404)
     if question.is_active != payload.is_active:
         question.is_active = payload.is_active
-        question.updated_at = datetime.now(timezone.utc)
+        question.updated_at = datetime.now(UTC)
         add_audit(
             session,
             action_code="QUESTION_ACTIVATED" if question.is_active else "QUESTION_RETIRED",

@@ -1,12 +1,16 @@
 import os
 import time
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Iterator
 
 from sqlalchemy import make_url, select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
@@ -103,7 +107,19 @@ async def _initialize_local_database_unlocked() -> None:
         return
 
     from app.db.base import Base
-    from app.db.models import ClassTrack, EventEdition, Question, QuestionClass, QuestionOption, QuizBlueprint, QuizDistribution, QuizRealtimeRelayLock, Round, Team, TeamClass
+    from app.db.models import (
+        ClassTrack,
+        EventEdition,
+        Question,
+        QuestionClass,
+        QuestionOption,
+        QuizBlueprint,
+        QuizDistribution,
+        QuizRealtimeRelayLock,
+        Round,
+        Team,
+        TeamClass,
+    )
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

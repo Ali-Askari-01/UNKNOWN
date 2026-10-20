@@ -1,8 +1,7 @@
 """Snapshot answer keys and question types for automatic quiz grading."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0010_auto_quiz_rules"
 down_revision = "0009_question_content_snapshots"

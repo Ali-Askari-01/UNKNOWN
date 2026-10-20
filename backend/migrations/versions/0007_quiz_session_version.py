@@ -1,8 +1,7 @@
 """Add optimistic concurrency control to quiz session actions."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0007_quiz_session_version"
 down_revision = "0006_quiz_realtime_events"

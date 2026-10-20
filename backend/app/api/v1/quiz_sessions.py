@@ -1,7 +1,7 @@
 import json
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from random import SystemRandom
 from uuid import UUID
 
@@ -10,14 +10,28 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.errors import AppError
-from app.core.auth import require_admin
 from app.core.audit import add_audit
+from app.core.auth import require_admin
+from app.core.errors import AppError
 from app.core.idempotency import request_hash, reserve
-from app.db.models import ClassTrack, Question, QuestionClass, QuizBlueprint, QuizQuestion, QuizSession
+from app.db.models import (
+    ClassTrack,
+    Question,
+    QuestionClass,
+    QuizBlueprint,
+    QuizQuestion,
+    QuizSession,
+)
 from app.db.session import get_db_session
 from app.realtime.manager import connection_manager
-from app.schemas.session import QuizSessionActionResponse, QuizSessionCreate, QuizSessionJoinResponse, QuizSessionQuestionAdmin, QuizSessionQuestionPublic, QuizSessionResponse
+from app.schemas.session import (
+    QuizSessionActionResponse,
+    QuizSessionCreate,
+    QuizSessionJoinResponse,
+    QuizSessionQuestionAdmin,
+    QuizSessionQuestionPublic,
+    QuizSessionResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["quiz-sessions"])
 randomizer = SystemRandom()
@@ -215,7 +229,7 @@ async def quiz_session_action(
     if action == "advance" and quiz_session.status != "ACTIVE":
         raise AppError("INVALID_SESSION_TRANSITION", "Only an active session can advance.", 409)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     current = next((item for item in quiz_session.questions if item.opened_at is not None and item.closed_at is None), None)
     if action == "open":
         quiz_session.status = "OPEN"

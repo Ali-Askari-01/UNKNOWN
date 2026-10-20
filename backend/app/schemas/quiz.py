@@ -2,7 +2,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-
 QUESTION_TYPES = "MCQ|RIDDLE|CODE|DEBUGGING|CONCEPTUAL|THEORY"
 
 

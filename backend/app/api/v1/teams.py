@@ -8,7 +8,12 @@ from app.core.auth import require_admin
 from app.db.models import ClassTrack, EventEdition, Round, ScoreEntry, Team, TeamClass
 from app.db.session import get_db_session
 from app.repositories.team import TeamRepository
-from app.schemas.team import ClassTrackResponse, EventStandingResponse, TeamMemberResponse, TeamResponse
+from app.schemas.team import (
+    ClassTrackResponse,
+    EventStandingResponse,
+    TeamMemberResponse,
+    TeamResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["teams"])
 

@@ -7,9 +7,19 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.errors import AppError, app_error_handler, http_exception_handler, unhandled_exception_handler, validation_error_handler
+from app.core.errors import (
+    AppError,
+    app_error_handler,
+    http_exception_handler,
+    unhandled_exception_handler,
+    validation_error_handler,
+)
 from app.core.logging import configure_logging
-from app.core.middleware import CookieOriginMiddleware, RequestIdMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    CookieOriginMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.core.observability import RequestLoggingMiddleware
 from app.db.session import dispose_engine, initialize_local_database
 from app.realtime.manager import connection_manager

@@ -19,7 +19,7 @@ async def readiness() -> JSONResponse:
     realtime = connection_manager.health_snapshot()
     try:
         await ping_database()
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure means not ready; never crash the probe
         return JSONResponse(
             status_code=503,
             content={"status": "unavailable", "database": "unavailable", "realtime": realtime},
@@ -27,7 +27,7 @@ async def readiness() -> JSONResponse:
     if get_settings().environment == "production":
         try:
             revision = await get_schema_revision()
-        except Exception:
+        except Exception:  # noqa: BLE001 - any failure means not ready; never crash the probe
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "migration": "unavailable", "realtime": realtime},

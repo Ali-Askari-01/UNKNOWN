@@ -16,9 +16,23 @@ from typing import Any
 from openpyxl import load_workbook
 from sqlalchemy import select
 
-from app.db.models import ClassTrack, EventEdition, Round, ScoreEntry, Student, Team, TeamClass, TeamMember
 from app.core.config import get_settings
-from app.db.session import SessionFactory, dispose_engine, get_schema_revision, initialize_local_database
+from app.db.models import (
+    ClassTrack,
+    EventEdition,
+    Round,
+    ScoreEntry,
+    Student,
+    Team,
+    TeamClass,
+    TeamMember,
+)
+from app.db.session import (
+    SessionFactory,
+    dispose_engine,
+    get_schema_revision,
+    initialize_local_database,
+)
 
 EVENT_YEAR = 2026
 TEAM_RENAMES = {

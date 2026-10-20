@@ -1,15 +1,15 @@
 import asyncio
 
-import pytest
 import bcrypt
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.pool import NullPool
 
+import app.db.session as db_session
 from app.core.config import Settings
 from app.db.models import QuizRealtimeEvent, QuizRealtimeRelayLock, QuizSession
 from app.db.session import SessionFactory, initialize_local_database
-import app.db.session as db_session
 from app.main import app
 from app.realtime.manager import ConnectionManager
 

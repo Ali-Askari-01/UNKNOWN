@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from app.core.config import get_settings
 from app.realtime.manager import connection_manager
 
-
 router = APIRouter(prefix="/api/v1", tags=["system"])
 
 

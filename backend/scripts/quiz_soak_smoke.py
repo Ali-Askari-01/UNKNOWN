@@ -16,7 +16,6 @@ from statistics import mean
 from typing import Any
 
 import httpx
-
 from e2e_smoke import run as run_e2e
 
 

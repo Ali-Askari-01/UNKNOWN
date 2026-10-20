@@ -1,8 +1,7 @@
 """Serialize realtime event identity allocation across API workers."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0008_realtime_event_ordering"
 down_revision = "0007_quiz_session_version"

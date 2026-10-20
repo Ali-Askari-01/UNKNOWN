@@ -3,7 +3,6 @@
 import sqlalchemy as sa
 from alembic import op
 
-
 revision = "0003_shared_rate_limit_events"
 down_revision = "0002_score_precision"
 branch_labels = None

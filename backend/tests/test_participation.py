@@ -22,6 +22,7 @@ async def test_register_answer_and_build_leaderboard() -> None:
         teams = await client.get("/api/v1/teams", params={"edition_id": "00000000-0000-0000-0000-000000000000"})
         # The local seed team is read directly through the database-backed public endpoint in this test.
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:
@@ -86,6 +87,7 @@ async def test_duplicate_final_answer_is_rejected() -> None:
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/open")
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/start")
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:
@@ -174,6 +176,7 @@ async def test_public_session_lookup_and_participant_registration() -> None:
         quiz = await client.post("/api/v1/admin/quiz-sessions", json={"blueprint_id": blueprints.json()[0]["id"]})
         session = await client.get(f"/api/v1/quiz-sessions/by-code/{quiz.json()['quiz_code']}")
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:
@@ -200,6 +203,7 @@ async def test_participant_mutation_requires_team_authentication() -> None:
         blueprints = await client.get("/api/v1/quiz-blueprints")
         quiz = await client.post("/api/v1/admin/quiz-sessions", json={"blueprint_id": blueprints.json()[0]["id"]})
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:
@@ -227,6 +231,7 @@ async def test_buzzer_is_rejected_for_non_riddle_questions() -> None:
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/open")
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/start")
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:
@@ -259,6 +264,7 @@ async def test_non_riddle_questions_do_not_create_buzzer_winners() -> None:
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/open")
         await client.post(f"/api/v1/admin/quiz-sessions/{session_id}/actions/start")
         from sqlalchemy import select
+
         from app.db.models import ClassTrack, Team, TeamClass
         from app.db.session import SessionFactory
         async with SessionFactory() as db:

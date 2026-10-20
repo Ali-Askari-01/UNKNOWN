@@ -3,8 +3,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import update
 
 from app.db.models import QuizSession
-from app.db.session import SessionFactory
-from app.db.session import initialize_local_database
+from app.db.session import SessionFactory, initialize_local_database
 from app.main import app
 
 

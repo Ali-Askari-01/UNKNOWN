@@ -1,8 +1,7 @@
 """Store official maximum points for normalized event rankings."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0011_round_max_points"
 down_revision = "0010_auto_quiz_rules"

@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -124,7 +124,7 @@ class ConnectionManager:
                     await asyncio.sleep(0.15)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 - keep the relay loop alive through transient DB failures
                 await asyncio.sleep(1)
 
     @staticmethod
@@ -150,9 +150,9 @@ class ConnectionManager:
         connections = list(self._connections.get(session_id, set()))
         if not connections:
             return
-        created_at = event["created_at"] or datetime.now(timezone.utc)
+        created_at = event["created_at"] or datetime.now(UTC)
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at = created_at.replace(tzinfo=UTC)
         message = {
             "eventId": f"{event['event_type']}-{session_id}-{event_id}",
             "type": event["event_type"],
@@ -165,7 +165,7 @@ class ConnectionManager:
         for websocket in connections:
             try:
                 await websocket.send_json(message)
-            except Exception:
+            except Exception:  # noqa: BLE001 - any send failure marks the socket stale below
                 stale.append(websocket)
         for websocket in stale:
             self.disconnect(session_id, websocket)

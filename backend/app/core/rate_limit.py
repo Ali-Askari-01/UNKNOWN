@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Request
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import AppError
 from app.db.models import RateLimitBucket, RateLimitEvent
@@ -27,41 +27,40 @@ async def enforce_rate_limit(
     rejected or later-rolled-back request still counts against abuse controls and that all API
     workers observe the same window.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=window_seconds)
     bucket_key = request_bucket_key(request, bucket, identity)
 
     for _ in range(2):
         try:
-            async with SessionFactory() as session:
-                async with session.begin():
-                    bucket_query = (
-                        select(RateLimitBucket)
-                        .where(RateLimitBucket.bucket_key == bucket_key)
-                        .with_hint(RateLimitBucket, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
-                    )
-                    bucket_row = await session.scalar(bucket_query)
-                    if bucket_row is None:
-                        session.add(RateLimitBucket(bucket_key=bucket_key))
-                        await session.flush()
+            async with SessionFactory() as session, session.begin():
+                bucket_query = (
+                    select(RateLimitBucket)
+                    .where(RateLimitBucket.bucket_key == bucket_key)
+                    .with_hint(RateLimitBucket, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+                )
+                bucket_row = await session.scalar(bucket_query)
+                if bucket_row is None:
+                    session.add(RateLimitBucket(bucket_key=bucket_key))
+                    await session.flush()
 
-                    await session.execute(
-                        delete(RateLimitEvent).where(
-                            RateLimitEvent.bucket_key == bucket_key,
-                            RateLimitEvent.occurred_at < cutoff,
-                        )
+                await session.execute(
+                    delete(RateLimitEvent).where(
+                        RateLimitEvent.bucket_key == bucket_key,
+                        RateLimitEvent.occurred_at < cutoff,
                     )
-                    event_count = await session.scalar(
-                        select(func.count(RateLimitEvent.id)).where(
-                            RateLimitEvent.bucket_key == bucket_key,
-                            RateLimitEvent.occurred_at >= cutoff,
-                        )
+                )
+                event_count = await session.scalar(
+                    select(func.count(RateLimitEvent.id)).where(
+                        RateLimitEvent.bucket_key == bucket_key,
+                        RateLimitEvent.occurred_at >= cutoff,
                     )
-                    if int(event_count or 0) >= limit:
-                        rate_limited = True
-                    else:
-                        rate_limited = False
-                        session.add(RateLimitEvent(bucket_key=bucket_key, occurred_at=now))
+                )
+                if int(event_count or 0) >= limit:
+                    rate_limited = True
+                else:
+                    rate_limited = False
+                    session.add(RateLimitEvent(bucket_key=bucket_key, occurred_at=now))
             if rate_limited:
                 raise AppError("RATE_LIMITED", "Too many requests. Please try again shortly.", 429)
             return
