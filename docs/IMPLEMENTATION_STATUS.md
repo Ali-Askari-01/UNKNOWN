@@ -69,6 +69,11 @@ Implemented and locally verified.
   the development and production header sets.
 - Production JavaScript dependency audit passes with no known moderate-or-higher advisories; the
   `shadcn` CLI is development-only and patched transitive versions are pinned centrally.
+- The shared `pnpm check` gate now also runs `pnpm test:frontend`, a Vitest unit suite covering the
+  FastAPI realtime client (endpoint URL construction and encoded session path, subprotocol token
+  authentication, exponential reconnect backoff with cap and reset, explicit-close cancellation, and
+  malformed event tolerance). Frontend unit tests, typecheck, and the production build also pass
+  locally.
 
 ## Current verification
 
@@ -107,6 +112,8 @@ Implemented and locally verified.
   The current release adds `0010_auto_quiz_rules`; the connected SQL Server must be migrated to
   that head before the automatic grading fields can be used there.
   strict production mode rejects incomplete/default configuration without printing secret values.
+  Frontend unit tests: the FastAPI realtime client passes its seven-test Vitest suite, together with
+  the strict typecheck and the production build.
 - Production-configured runtime smoke: `/health/ready` returned HTTP 200 against SQL Server with
   `database: ok`, migration validation, and `realtime.relayRunning: true`.
 - Production readiness now fails closed when the database schema revision is missing or older than

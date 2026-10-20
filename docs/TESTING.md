@@ -6,8 +6,9 @@
 corepack pnpm check
 ```
 
-This runs strict frontend TypeScript validation, FastAPI Ruff/tests, and the production Next.js
-build. Backend-only checks are available with `python -m ruff check app tests scripts migrations` and
+This runs strict frontend TypeScript validation, frontend Vitest unit tests, FastAPI Ruff/tests,
+and the production Next.js build. Frontend-only checks are available with `pnpm test:frontend`;
+backend-only checks are available with `python -m ruff check app tests scripts migrations` and
 `python -m pytest -q` from `backend/`.
 
 CI also runs `pnpm audit --prod --audit-level moderate`; the production dependency graph is kept
@@ -32,6 +33,9 @@ service using
 - Blueprint and quiz-session lifecycle transitions.
 - Team/session ownership, pending answers, judging, score ledger, and audit records.
 - Concurrent buzzer presses with exactly one database-confirmed winner.
+- Frontend realtime client behavior via Vitest: endpoint URL construction, encoded session paths,
+  subprotocol token authentication, exponential reconnect backoff with cap and reset, explicit-close
+  cancellation, and malformed event tolerance.
 - Question creation rejects invalid class-track references.
 - SQL Server readiness, migration state, backup verification, and restore rehearsal.
 - Five-team authenticated load smoke against one active question.
